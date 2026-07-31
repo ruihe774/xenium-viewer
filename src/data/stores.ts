@@ -115,7 +115,7 @@ export interface DataSource {
 }
 
 /** zarrita's FetchStore needs an absolute URL, so resolve relative ones here. */
-function normalizeUrl(url: string): string {
+export function normalizeUrl(url: string): string {
   const absolute = new URL(url, self.location.href).href;
   return absolute.endsWith("/") ? absolute.slice(0, -1) : absolute;
 }

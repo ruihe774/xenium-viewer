@@ -622,3 +622,59 @@ button.link {
   color: var(--danger);
   white-space: pre-wrap;
 }
+
+.recents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.recent-row {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.recent-row + .recent-row {
+  margin-top: 6px;
+}
+
+.recent-item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  text-align: left;
+  padding: 7px 10px;
+}
+
+.recent-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.recent-meta {
+  color: var(--text-dim);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  width: 100%;
+}
+
+.recent-delete {
+  flex: none;
+  padding: 0 10px;
+  color: var(--text-dim);
+}
+
+.recent-delete:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}

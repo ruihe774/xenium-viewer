@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { CellsClient, type ColumnData } from "./data/cells";
 import { type Dataset, loadDataset } from "./data/dataset";
-import { loadSettings, saveSettings } from "./data/settings";
+import { saveRecentSettings, touchRecent, type StoredSettings } from "./data/recents";
 import { type DataSource, type SourceSpec, createDataSource } from "./data/stores";
 import { categoryColor, sampleColormap } from "./ui/colormaps";
 
@@ -71,6 +71,8 @@ export interface AppState {
   error?: string;
   source?: DataSource;
   dataset?: Dataset;
+  /** IndexedDB id of the recent record backing the open dataset's settings. */
+  recentId?: string;
   channels: ChannelSettings[];
   imageOpacity: number;
   /** Current orthographic zoom, mirrored here for the scale bar and readouts. */
@@ -209,10 +211,17 @@ function hiddenFor(state: AppState, coloring: CellColoring): Set<string> | undef
   return set ? new Set(set.hidden) : undefined;
 }
 
-/** Persists the current display preferences for the open dataset. */
+// Setters call persist() on every slider frame (dragging contrast, opacity),
+// but IndexedDB writes are async and there is no reason to fire one per
+// frame — so the actual write is debounced behind this delay.
+const PERSIST_DEBOUNCE_MS = 400;
+let persistTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Saves the current display preferences into the open dataset's recent record. */
 function persist(state: AppState): void {
-  if (!state.dataset) return;
-  saveSettings(state.dataset.name, {
+  if (!state.recentId) return;
+  const id = state.recentId;
+  const settings: StoredSettings = {
     channels: state.channels.map((c) => ({
       visible: c.visible,
       color: c.color,
@@ -225,7 +234,11 @@ function persist(state: AppState): void {
     cellOpacity: state.cellOpacity,
     imageOpacity: state.imageOpacity,
     cellColoring: state.cellColoring,
-  });
+  };
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    void saveRecentSettings(id, settings);
+  }, PERSIST_DEBOUNCE_MS);
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -256,6 +269,7 @@ export const useApp = create<AppState>((set, get) => ({
       error: undefined,
       dataset: undefined,
       source: undefined,
+      recentId: undefined,
       cells: IDLE_CELLS,
       cellsClient: undefined,
       selectedCell: undefined,
@@ -268,7 +282,8 @@ export const useApp = create<AppState>((set, get) => ({
       const dataset = await loadDataset(source);
       const primary =
         dataset.images.find((i) => i.name === "morphology_focus") ?? dataset.images[0];
-      const saved = loadSettings(dataset.name);
+      const record = await touchRecent(spec);
+      const saved = record.settings;
       const channels: ChannelSettings[] = primary.channels.map((_, i) => ({
         visible: saved.channels?.[i]?.visible ?? i < 4,
         color:
@@ -285,6 +300,7 @@ export const useApp = create<AppState>((set, get) => ({
         status: "ready",
         source,
         dataset,
+        recentId: record.id,
         channels,
         // Contrast is only auto-computed when the user has no saved window.
         autoContrast: !saved.channels,
@@ -532,6 +548,7 @@ export const useApp = create<AppState>((set, get) => ({
       error: undefined,
       dataset: undefined,
       source: undefined,
+      recentId: undefined,
       channels: [],
       cells: IDLE_CELLS,
       cellsClient: undefined,
