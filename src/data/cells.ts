@@ -28,8 +28,7 @@ export class CellsClient {
    */
   async init(spec: SourceSpec, dataset: Dataset) {
     if (!dataset.table) throw new Error("Dataset has no table");
-    const shapes =
-      dataset.shapes.find((s) => s.name === "cell_boundaries") ?? dataset.shapes[0];
+    const shapes = dataset.shapes.find((s) => s.name === "cell_boundaries") ?? dataset.shapes[0];
     if (!shapes) throw new Error("Dataset has no shapes element to align cells with");
     return this.#api.init(spec, dataset.table, shapes.toPixel);
   }

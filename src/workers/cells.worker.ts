@@ -361,7 +361,9 @@ class CellStore implements CellsWorkerApi {
 
     // Categories arrive in first-seen order; the legend reads best sorted by
     // name, so remap codes to a sorted order before storing.
-    const order = categories.map((_, i) => i).sort((a, b) => categories[a].localeCompare(categories[b]));
+    const order = categories
+      .map((_, i) => i)
+      .sort((a, b) => categories[a].localeCompare(categories[b]));
     const rank = new Array<number>(order.length);
     order.forEach((oldCode, newCode) => (rank[oldCode] = newCode));
     for (let i = 0; i < codes.length; i++) {
@@ -582,15 +584,14 @@ function emptyShapes() {
 }
 
 /** Row index in the table for each polygon, matched on cell id. */
-function matchToTable(
-  ids: string[] | undefined,
-  tableIds: string[],
-  count: number,
-): Int32Array {
+function matchToTable(ids: string[] | undefined, tableIds: string[], count: number): Int32Array {
   const out = new Int32Array(count);
   // cell_boundaries is written in table order, so skip the map entirely when
   // the ids line up. nucleus_boundaries does not (a cell can have >1 nucleus).
-  if (!ids || (ids.length === count && ids[0] === tableIds[0] && ids[count - 1] === tableIds[count - 1])) {
+  if (
+    !ids ||
+    (ids.length === count && ids[0] === tableIds[0] && ids[count - 1] === tableIds[count - 1])
+  ) {
     for (let i = 0; i < count; i++) out[i] = i < tableIds.length ? i : -1;
     return out;
   }

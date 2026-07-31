@@ -9,7 +9,12 @@
   --danger: #ff6b6b;
 
   color-scheme: dark;
-  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-family:
+    "Inter",
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
   font-size: 13px;
   color: var(--text);
   background: var(--bg);

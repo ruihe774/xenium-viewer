@@ -22,11 +22,13 @@ Try it: https://xenium-viewer.ruihe774.workers.dev/.
 ## Prepare SpatialData zarr files
 
 Just use your saved zarr files if you're already using SpatialData, or:
+
 ```python
 import spatialdata_io
 sdata = spatialdata_io.xenium("/path/to/your/slide/")
 sdata.write("slide01.zarr")
 ```
+
 Then open the zarr in Xenium Viewer.
 
 ## Running it
@@ -64,7 +66,7 @@ aaaahaac-1,Plasma,
 ```
 
 - `cell_id` must match the table's index. Rows for cells not in the dataset are counted and
-  reported; if *nothing* matches, the import fails rather than adding an empty set.
+  reported; if _nothing_ matches, the import fails rather than adding an empty set.
 - `color` is optional — as a column, and per row. A group's colour is taken from the first row
   that supplies one, so declaring it once is enough; groups with no colour fall back to the
   built-in categorical palette. `#rgb`, `#rrggbb`, and `r,g,b` are accepted.
@@ -96,7 +98,7 @@ src/
 Three things carry most of the weight:
 
 **Image tiles.** Chunks are 4096×4096 uint16 (33.5 MB decoded) and zstd-compressed, so decoding
-dominates. A pool of three workers decodes them and caches the *decoded* chunks; tiles are cut
+dominates. A pool of three workers decodes them and caches the _decoded_ chunks; tiles are cut
 from that cache and transferred back as zero-copy buffers. Requests are routed to a worker by
 chunk coordinate, so a chunk is only ever decoded and held once. Rendering uses Viv's
 `MultiscaleImageLayer` with a hand-rolled `PixelSource` — Viv's own zarr loader rejects

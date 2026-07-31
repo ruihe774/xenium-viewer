@@ -1,0 +1,5 @@
+dist
+node_modules
+.venv
+*.zarr
+slide01_annotations

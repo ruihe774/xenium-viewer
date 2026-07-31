@@ -14,16 +14,25 @@ shell. The app never touches it.
 ## Commands
 
 ```bash
-npm run dev        # vite dev server on :5173 (strict port)
-npm run check      # typecheck + lint; run this before calling anything done
-npm run typecheck  # tsc --noEmit
-npm run lint       # eslint .
-npm run build      # tsc -b && vite build
-npm run preview    # serve the production build on :4173
+npm run dev           # vite dev server on :5173 (strict port)
+npm run check         # typecheck + lint + format check; run this before calling anything done
+npm run typecheck     # tsc --noEmit
+npm run lint          # eslint .
+npm run format        # prettier --write .
+npm run format:check  # prettier --check .
+npm run build         # tsc -b && vite build
+npm run preview       # serve the production build on :4173
 ```
 
-There is no formatter and no test suite. `npm run check` plus driving the app in a browser is
-the whole verification story — see "Verifying changes".
+There is no test suite. `npm run check` plus driving the app in a browser is the whole
+verification story — see "Verifying changes".
+
+### Formatting
+
+Prettier, config in `.prettierrc.json`. Defaults are kept except `printWidth: 100` and
+`trailingComma: "all"`, matching the width and comma style the codebase already used before
+Prettier existed. `eslint-config-prettier` is the last entry in `eslint.config.js` so stylistic
+ESLint rules never fight Prettier's output.
 
 ### Linting
 
@@ -80,7 +89,7 @@ src/
 
 Two workers do the heavy lifting, and both keep their bulk data worker-side:
 
-- **`workers/image.worker.ts`** — a pool of three, each holding an LRU of *decoded* chunks.
+- **`workers/image.worker.ts`** — a pool of three, each holding an LRU of _decoded_ chunks.
   Chunks are 4096² uint16 (33.5 MB) and zstd-compressed, so decoding dominates. Requests are
   routed to a worker by chunk coordinate (`ImagePyramid.#route`) so a chunk is decoded and
   held exactly once. Tiles are cut from the cache and transferred back zero-copy.
@@ -108,7 +117,7 @@ decode to strings.
 whole-slide view. `maxCacheSize` is capped explicitly in `Viewer.tsx`.
 
 **Viv's `selections` array identity must be stable.** Viv refetches every raster and drops its
-tile cache whenever it changes, so it is memoized on channel *count*, not on the channel
+tile cache whenever it changes, so it is memoized on channel _count_, not on the channel
 objects. Rebuilding it per contrast tweak makes every slider drag re-read the pyramid.
 
 **Our `PixelSource` deliberately has no `getRaster`.** Viv feature-detects it to add a
@@ -129,8 +138,8 @@ range. Duplicate luma.gl instances render a silently blank canvas.
 
 **Per-cell colours are RGBA (`size: 4`), and alpha carries visibility.** Hiding a cell group
 sets alpha to 0 rather than rebuilding geometry, which keeps picking indices stable. If you
-change the stride, update `buildColors` in `store.ts` *and* `expandColors` in
-`boundaryLayers.ts` *and* the layer attribute sizes together.
+change the stride, update `buildColors` in `store.ts` _and_ `expandColors` in
+`boundaryLayers.ts` _and_ the layer attribute sizes together.
 
 **`cell_boundaries` is written in table row order; `nucleus_boundaries` is not** (609,656 rows
 against 606,931 cells — a cell can have more than one nucleus). `matchToTable` fast-paths the
@@ -175,9 +184,9 @@ exercises the actual handler:
 const blob = await (await fetch("/data/slide01_annotations/slide01_major_cell_type.csv")).blob();
 const dt = new DataTransfer();
 dt.items.add(new File([blob], "slide01_major_cell_type.csv", { type: "text/csv" }));
-document.querySelector(".dropzone").dispatchEvent(
-  new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }),
-);
+document
+  .querySelector(".dropzone")
+  .dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
 ```
 
 **`showDirectoryPicker` cannot be driven from the browser tools** — it needs a real user
@@ -191,7 +200,7 @@ whole-slide view and ~570 MB at native resolution.
 
 - TypeScript strict, including `noUnusedLocals` / `noUnusedParameters`. `npm run check` is the
   only automated gate; keep it clean.
-- Comments explain *why*, especially where the code works around a library's behaviour. The
+- Comments explain _why_, especially where the code works around a library's behaviour. The
   constraints above are all documented at their call sites too — keep those in sync.
 - Tuning constants (cache sizes, tile size, polygon caps, zoom thresholds) are named
   module-level constants with a comment giving the reasoning, not inline magic numbers.

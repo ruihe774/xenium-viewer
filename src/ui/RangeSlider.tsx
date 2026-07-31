@@ -49,9 +49,7 @@ export function RangeSlider({ min, max, value, onChange, histogram, color, step 
         const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
         const next = roundTo(min + ratio * span, step);
         onChange(
-          which === "lo"
-            ? [Math.min(next, hi - step), hi]
-            : [lo, Math.max(next, lo + step)],
+          which === "lo" ? [Math.min(next, hi - step), hi] : [lo, Math.max(next, lo + step)],
         );
       };
       const up = () => {

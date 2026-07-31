@@ -399,7 +399,13 @@ export function Viewer() {
       }
       return { text: lines.join("\n"), style: TOOLTIP_STYLE };
     },
-    [cellBoundaries.shapes, nucleusBoundaries.shapes, cells.ids, cells.columnData, cellColoring.column],
+    [
+      cellBoundaries.shapes,
+      nucleusBoundaries.shapes,
+      cells.ids,
+      cells.columnData,
+      cellColoring.column,
+    ],
   );
 
   return (

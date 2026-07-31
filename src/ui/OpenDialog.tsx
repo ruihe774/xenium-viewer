@@ -56,27 +56,33 @@ export function OpenDialog() {
           </p>
         )}
 
-        {showHttpPicker ? <>
-          <div className="divider">OR</div>
+        {showHttpPicker ? (
+          <>
+            <div className="divider">OR</div>
 
-          <div className="row">
-            <input
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://host/slide.zarr"
-              spellCheck={false}
-            />
-            <button
-              onClick={() =>
-                void open({ kind: "http", url, name: url.split("/").filter(Boolean).pop() ?? url })
-              }
-              disabled={busy || url.trim() === ""}
-            >
-              Load
-            </button>
-          </div>
-        </> : null}
+            <div className="row">
+              <input
+                type="text"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://host/slide.zarr"
+                spellCheck={false}
+              />
+              <button
+                onClick={() =>
+                  void open({
+                    kind: "http",
+                    url,
+                    name: url.split("/").filter(Boolean).pop() ?? url,
+                  })
+                }
+                disabled={busy || url.trim() === ""}
+              >
+                Load
+              </button>
+            </div>
+          </>
+        ) : null}
 
         {(error ?? pickerError) && <div className="error">{error ?? pickerError}</div>}
       </div>

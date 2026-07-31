@@ -23,12 +23,7 @@ export interface ChannelStats {
 /** Longest edge of the minimap thumbnail, in pixels. */
 const THUMBNAIL_MAX = 256;
 
-function downsample(
-  data: Uint16Array,
-  width: number,
-  height: number,
-  maxEdge: number,
-): TileData {
+function downsample(data: Uint16Array, width: number, height: number, maxEdge: number): TileData {
   const step = Math.max(1, Math.ceil(Math.max(width, height) / maxEdge));
   const outWidth = Math.ceil(width / step);
   const outHeight = Math.ceil(height / step);
@@ -43,8 +38,19 @@ function downsample(
 }
 
 export interface ImageWorkerApi {
-  init: (spec: SourceSpec, levelPaths: string[], axes: string[], cacheBytes: number) => Promise<void>;
-  getTile: (level: number, c: number, tx: number, ty: number, tileSize: number) => Promise<TileData>;
+  init: (
+    spec: SourceSpec,
+    levelPaths: string[],
+    axes: string[],
+    cacheBytes: number,
+  ) => Promise<void>;
+  getTile: (
+    level: number,
+    c: number,
+    tx: number,
+    ty: number,
+    tileSize: number,
+  ) => Promise<TileData>;
   channelStats: (level: number, c: number) => Promise<ChannelStats>;
 }
 
@@ -181,8 +187,16 @@ class ImageTileServer implements ImageWorkerApi {
     const chunkHeight = arr.chunks[yi];
     const chunkWidth = arr.chunks[xi];
     const reads: Promise<void>[] = [];
-    for (let cy = Math.floor(y0 / chunkHeight); cy <= Math.floor((y0 + height - 1) / chunkHeight); cy++) {
-      for (let cx = Math.floor(x0 / chunkWidth); cx <= Math.floor((x0 + width - 1) / chunkWidth); cx++) {
+    for (
+      let cy = Math.floor(y0 / chunkHeight);
+      cy <= Math.floor((y0 + height - 1) / chunkHeight);
+      cy++
+    ) {
+      for (
+        let cx = Math.floor(x0 / chunkWidth);
+        cx <= Math.floor((x0 + width - 1) / chunkWidth);
+        cx++
+      ) {
         const coords = new Array<number>(arr.shape.length).fill(0);
         // Channel chunking is [1, ...] in practice, but don't assume it.
         const channelInChunk = ci >= 0 ? c % arr.chunks[ci] : 0;

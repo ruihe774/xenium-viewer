@@ -30,9 +30,7 @@ export function GroupsPanel() {
 
   if (!dataset?.table) return null;
   const ready = cells.status === "ready";
-  const active = groupSets.find(
-    (g) => coloring.mode === "group" && g.name === coloring.column,
-  );
+  const active = groupSets.find((g) => coloring.mode === "group" && g.name === coloring.column);
 
   return (
     <section className="section">
@@ -115,9 +113,7 @@ export function GroupsPanel() {
                 </button>
                 <button
                   className="link"
-                  onClick={() =>
-                    setGroupCategoriesHidden(active.name, [...active.categories])
-                  }
+                  onClick={() => setGroupCategoriesHidden(active.name, [...active.categories])}
                 >
                   none
                 </button>

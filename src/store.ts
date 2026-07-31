@@ -272,8 +272,7 @@ export const useApp = create<AppState>((set, get) => ({
       const channels: ChannelSettings[] = primary.channels.map((_, i) => ({
         visible: saved.channels?.[i]?.visible ?? i < 4,
         color:
-          saved.channels?.[i]?.color ??
-          DEFAULT_CHANNEL_COLORS[i % DEFAULT_CHANNEL_COLORS.length],
+          saved.channels?.[i]?.color ?? DEFAULT_CHANNEL_COLORS[i % DEFAULT_CHANNEL_COLORS.length],
         contrastLimits: saved.channels?.[i]?.contrastLimits ?? [0, 1000],
         domain: [0, 65535],
         histogram: [],
@@ -292,13 +291,12 @@ export const useApp = create<AppState>((set, get) => ({
         showCells: saved.showCells ?? true,
         showCellBoundaries: saved.showCellBoundaries ?? true,
         showNucleusBoundaries: saved.showNucleusBoundaries ?? false,
-        boundaryStyle: restoreCellColoring ? saved.boundaryStyle ?? "outline" : "outline",
-        cellOpacity: restoreCellColoring ? saved.cellOpacity ?? 0.7 : 0.7,
+        boundaryStyle: restoreCellColoring ? (saved.boundaryStyle ?? "outline") : "outline",
+        cellOpacity: restoreCellColoring ? (saved.cellOpacity ?? 0.7) : 0.7,
         imageOpacity: saved.imageOpacity ?? 1,
-        cellColoring:
-          restoreCellColoring
-            ? saved.cellColoring
-            : { mode: "uniform", colormap: "viridis" },
+        cellColoring: restoreCellColoring
+          ? saved.cellColoring
+          : { mode: "uniform", colormap: "viridis" },
       });
 
       if (!dataset.table) return;
@@ -458,10 +456,7 @@ export const useApp = create<AppState>((set, get) => ({
         );
         set((s) => ({
           // Re-importing the same name replaces the previous entry in place.
-          groupSets: [
-            ...s.groupSets.filter((g) => g.name !== name),
-            { ...summary, hidden: [] },
-          ],
+          groupSets: [...s.groupSets.filter((g) => g.name !== name), { ...summary, hidden: [] }],
         }));
         lastName = name;
       }

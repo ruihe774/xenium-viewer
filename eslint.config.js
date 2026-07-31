@@ -1,4 +1,5 @@
 import js from "@eslint/js";
+import prettier from "eslint-config-prettier";
 import react from "eslint-plugin-react";
 import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
@@ -56,4 +57,7 @@ export default tseslint.config(
     },
     extends: [tseslint.configs.disableTypeChecked],
   },
+
+  // Must stay last: turns off stylistic rules that would fight Prettier.
+  prettier,
 );
