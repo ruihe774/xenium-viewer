@@ -1,0 +1,49 @@
+{
+  "name": "xenium-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@deck.gl/core": "9.3.3",
+    "@deck.gl/extensions": "9.3.3",
+    "@deck.gl/geo-layers": "9.3.3",
+    "@deck.gl/layers": "9.3.3",
+    "@deck.gl/react": "9.3.3",
+    "@hms-dbmi/viv": "0.22.0",
+    "@luma.gl/constants": "9.3.3",
+    "@luma.gl/core": "9.3.3",
+    "@luma.gl/engine": "9.3.3",
+    "@luma.gl/shadertools": "9.3.3",
+    "@luma.gl/webgl": "9.3.3",
+    "comlink": "^4.4.2",
+    "hyparquet": "^1.27.1",
+    "hyparquet-compressors": "^1.1.1",
+    "numcodecs": "^0.3.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zarrita": "^0.7.3",
+    "zustand": "^5.0.2"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/wicg-file-system-access": "^2023.10.5",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5"
+  },
+  "overrides": {
+    "@luma.gl/core": "9.3.3",
+    "@luma.gl/engine": "9.3.3",
+    "@luma.gl/webgl": "9.3.3",
+    "@luma.gl/shadertools": "9.3.3",
+    "@luma.gl/constants": "9.3.3",
+    "@deck.gl/core": "9.3.3"
+  }
+}

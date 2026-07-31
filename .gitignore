@@ -1,2 +1,6 @@
 .venv
 *.zarr
+node_modules
+dist
+*.tsbuildinfo
+slide01_annotations
