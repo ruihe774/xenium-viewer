@@ -1,8 +1,10 @@
 # Xenium Viewer
 
-A browser-based alternative to 10x Xenium Explorer that reads **SpatialData zarr** stores
-instead of Xenium's native output bundle. Everything runs client-side in Chrome — there is no
-server component and no upload; the data is read directly off disk (or over HTTP) in chunks.
+A browser-based alternative to 10x Xenium Explorer.
+It reads [SpatialData](https://spatialdata.scverse.org/en/stable/) zarr stores.
+Everything runs client-side in Chrome — there is no server component and no upload;
+the data is read directly off disk (or over HTTP) in chunks.
+Try it: https://xenium-viewer.ruihe774.workers.dev/.
 
 ## What it does
 
@@ -13,11 +15,19 @@ server component and no upload; the data is read directly off disk (or over HTTP
 - **Colour by any `obs` column** — numeric columns get a colormap with a percentile-based
   range you can adjust; categorical columns get a palette and legend.
 - **Cell groups** — import your own per-cell annotations from CSV, colour by them, and show
-  or hide individual groups.
+  or hide individual groups. Use the same CSV format as in Xenium Explorer.
 - **Inspection** — hover for a readout, click a cell to pin its full `obs` record.
 - **Navigation** — whole-slide minimap with click-to-jump, µm scale bar, and linkable views.
 
-Display settings are remembered per dataset in `localStorage`.
+## Prepare SpatialData zarr files
+
+Just use your saved zarr files if you're already using SpatialData, or:
+```python
+import spatialdata_io
+sdata = spatialdata_io.xenium("/path/to/your/slide/")
+sdata.write("slide01.zarr")
+```
+Then open the zarr in Xenium Viewer.
 
 ## Running it
 
