@@ -73,8 +73,9 @@ export function RangeSlider({ min, max, value, onChange, histogram, color, step 
         {histogram && histogram.length > 0 && (
           <div className="range-hist">
             {histogram.map((count, i) => (
+              // Bins are positional and fixed in number, so the index is a
+              // stable identity here.
               <span
-                // eslint-disable-next-line react/no-array-index-key
                 key={i}
                 style={{ height: `${(Math.log1p(count) / peak) * 100}%` }}
               />

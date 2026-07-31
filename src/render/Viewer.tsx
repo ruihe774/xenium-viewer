@@ -340,8 +340,9 @@ export function Viewer() {
         // 1024x1024x uint16 per channel (8 MB for four channels), so the default
         // runs to gigabytes on a whole-slide view. Cap it instead.
         maxCacheSize: TILE_CACHE_SIZE,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any),
+        // Viv's layer props are typed loosely enough that the extra props above
+        // (excludeBackground, maxCacheSize) are not in its declaration.
+      } as unknown as ConstructorParameters<typeof MultiscaleImageLayer>[0]),
       ...boundaryLayers,
       ...cellLayers,
       ...selectionLayer,
@@ -384,10 +385,13 @@ export function Viewer() {
     <div ref={containerRef} className="stage-inner">
       {viewState && (
         <DeckGL
+          // Exposed for debugging from the console: layer list, tile cache
+          // contents, viewport state. Dev only.
           ref={(r) => {
             if (import.meta.env.DEV) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              (window as any).__deck = (r as any)?.deck;
+              (window as unknown as { __deck?: unknown }).__deck = (
+                r as unknown as { deck?: unknown } | null
+              )?.deck;
             }
           }}
           views={VIEW}
