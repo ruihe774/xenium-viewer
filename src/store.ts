@@ -278,6 +278,10 @@ export const useApp = create<AppState>((set, get) => ({
         domain: [0, 65535],
         histogram: [],
       }));
+      // Group sets come from files the user picks each session, so a saved
+      // colouring that points at one has nothing to resolve against.
+      // Also, ignore boundaryStyle and cellOpacity in this case.
+      const restoreCellColoring = saved.cellColoring && saved.cellColoring.mode !== "group";
       set({
         status: "ready",
         source,
@@ -288,13 +292,11 @@ export const useApp = create<AppState>((set, get) => ({
         showCells: saved.showCells ?? true,
         showCellBoundaries: saved.showCellBoundaries ?? true,
         showNucleusBoundaries: saved.showNucleusBoundaries ?? false,
-        boundaryStyle: saved.boundaryStyle ?? "outline",
-        cellOpacity: saved.cellOpacity ?? 0.7,
+        boundaryStyle: restoreCellColoring ? saved.boundaryStyle ?? "outline" : "outline",
+        cellOpacity: restoreCellColoring ? saved.cellOpacity ?? 0.7 : 0.7,
         imageOpacity: saved.imageOpacity ?? 1,
-        // Group sets come from files the user picks each session, so a saved
-        // colouring that points at one has nothing to resolve against.
         cellColoring:
-          saved.cellColoring && saved.cellColoring.mode !== "group"
+          restoreCellColoring
             ? saved.cellColoring
             : { mode: "uniform", colormap: "viridis" },
       });
