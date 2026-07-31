@@ -359,19 +359,31 @@ class CellStore implements CellsWorkerApi {
       );
     }
 
+    // Categories arrive in first-seen order; the legend reads best sorted by
+    // name, so remap codes to a sorted order before storing.
+    const order = categories.map((_, i) => i).sort((a, b) => categories[a].localeCompare(categories[b]));
+    const rank = new Array<number>(order.length);
+    order.forEach((oldCode, newCode) => (rank[oldCode] = newCode));
+    for (let i = 0; i < codes.length; i++) {
+      if (codes[i] >= 0) codes[i] = rank[codes[i]];
+    }
+    const sortedCategories = order.map((i) => categories[i]);
+    const sortedColors = order.map((i) => colors[i]);
+    const sortedCounts = order.map((i) => counts[i]);
+
     this.#groups.set(name, {
       kind: "categorical",
       codes,
-      categories,
-      counts: Uint32Array.from(counts),
-      colors,
+      categories: sortedCategories,
+      counts: Uint32Array.from(sortedCounts),
+      colors: sortedColors,
     });
 
     return {
       name,
-      categories,
-      counts,
-      colors,
+      categories: sortedCategories,
+      counts: sortedCounts,
+      colors: sortedColors,
       matched,
       unmatched,
       elapsedMs: Math.round(performance.now() - started),
