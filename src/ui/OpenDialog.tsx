@@ -31,6 +31,11 @@ export function OpenDialog() {
 
   const busy = status === "loading";
 
+  // serveData implemented in vite.config.ts is not suitable for production environment,
+  // where a static file server e.g. Nginx should be used. Disable it in prod.
+  // In vite preview, this can still be tested by navigating to the URL with ?zarr.
+  const showHttpPicker = import.meta.env.DEV;
+
   return (
     <div className="opener">
       <div className="opener-card">
@@ -51,25 +56,27 @@ export function OpenDialog() {
           </p>
         )}
 
-        <div className="divider">OR</div>
+        {showHttpPicker ? <>
+          <div className="divider">OR</div>
 
-        <div className="row">
-          <input
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://host/slide.zarr"
-            spellCheck={false}
-          />
-          <button
-            onClick={() =>
-              void open({ kind: "http", url, name: url.split("/").filter(Boolean).pop() ?? url })
-            }
-            disabled={busy || url.trim() === ""}
-          >
-            Load
-          </button>
-        </div>
+          <div className="row">
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://host/slide.zarr"
+              spellCheck={false}
+            />
+            <button
+              onClick={() =>
+                void open({ kind: "http", url, name: url.split("/").filter(Boolean).pop() ?? url })
+              }
+              disabled={busy || url.trim() === ""}
+            >
+              Load
+            </button>
+          </div>
+        </> : null}
 
         {(error ?? pickerError) && <div className="error">{error ?? pickerError}</div>}
       </div>
