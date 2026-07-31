@@ -17,10 +17,24 @@ interface GeneListProps {
   placeholder?: string;
 }
 
-/** Prefix matches first — typing "CD4" should not bury CD4 under NCD47. */
-function search(genes: string[], query: string): { rows: string[]; total: number } {
+/**
+ * Prefix matches first — typing "CD4" should not bury CD4 under NCD47. With an
+ * empty query, already-picked genes float to the top so a short selection stays
+ * visible without needing to search for it.
+ */
+function search(
+  genes: string[],
+  query: string,
+  selected: readonly string[],
+): { rows: string[]; total: number } {
   const q = query.trim().toLowerCase();
-  if (!q) return { rows: genes.slice(0, MAX_ROWS), total: genes.length };
+  if (!q) {
+    if (selected.length === 0) return { rows: genes.slice(0, MAX_ROWS), total: genes.length };
+    const picked = new Set(selected);
+    const rest = genes.filter((gene) => !picked.has(gene));
+    const all = selected.concat(rest);
+    return { rows: all.slice(0, MAX_ROWS), total: all.length };
+  }
   const prefix: string[] = [];
   const contains: string[] = [];
   for (const gene of genes) {
@@ -34,7 +48,7 @@ function search(genes: string[], query: string): { rows: string[]; total: number
 
 export function GeneList({ genes, selected, onPick, colorOf, placeholder }: GeneListProps) {
   const [query, setQuery] = useState("");
-  const { rows, total } = search(genes, query);
+  const { rows, total } = search(genes, query, selected);
 
   return (
     <>
