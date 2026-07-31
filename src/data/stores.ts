@@ -112,6 +112,8 @@ export interface DataSource {
   store: AsyncReadable;
   /** Opens a non-zarr file (e.g. `shapes/cell_boundaries/shapes.parquet`). */
   openFile: (path: string) => Promise<AsyncBuffer | undefined>;
+  /** Direct filenames under `path`, sorted. Empty when `path` is not a directory. */
+  listFiles: (path: string) => Promise<string[]>;
 }
 
 /** zarrita's FetchStore needs an absolute URL, so resolve relative ones here. */
@@ -139,16 +141,55 @@ async function openHttpFile(base: string, path: string): Promise<AsyncBuffer | u
   };
 }
 
+/** Number of `part.N.parquet` probes issued at once. */
+const PROBE_BATCH = 16;
+/** Refuse to probe forever if the server answers 200 to everything. */
+const PROBE_LIMIT = 4096;
+
+/**
+ * Enumerates a multi-part parquet directory over plain HTTP, which has no
+ * listing operation.
+ *
+ * Dask — and therefore spatialdata, which writes `points/*` through it — names
+ * parts `part.0.parquet`, `part.1.parquet`, … contiguously from zero, so the
+ * directory can be recovered by probing until the first gap. Probes go out in
+ * batches because a slide with 69 parts would otherwise cost 69 round trips.
+ */
+async function listHttpParts(base: string, path: string): Promise<string[]> {
+  const names: string[] = [];
+  for (let start = 0; start < PROBE_LIMIT; start += PROBE_BATCH) {
+    const batch = await Promise.all(
+      Array.from({ length: PROBE_BATCH }, async (_, i) => {
+        const name = `part.${start + i}.parquet`;
+        const url = `${base}/${path.replace(/^\//, "")}/${name}`;
+        const res = await fetch(url, { method: "HEAD" });
+        return res.ok ? name : undefined;
+      }),
+    );
+    for (const name of batch) {
+      if (!name) return names;
+      names.push(name);
+    }
+  }
+  return names;
+}
+
 export function createDataSource(spec: SourceSpec): DataSource {
   if (spec.kind === "fs") {
     const store = new FileSystemStore(spec.handle);
-    return { spec, store, openFile: (path) => store.openFile(path) };
+    return {
+      spec,
+      store,
+      openFile: (path) => store.openFile(path),
+      listFiles: (path) => store.listFiles(path),
+    };
   }
   const base = normalizeUrl(spec.url);
   return {
     spec,
     store: new FetchStore(base),
     openFile: (path) => openHttpFile(base, path),
+    listFiles: (path) => listHttpParts(base, path),
   };
 }
 

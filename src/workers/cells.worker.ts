@@ -5,6 +5,7 @@ import { parquetRead } from "hyparquet";
 import { compressors } from "hyparquet-compressors";
 import type { ObsColumn, TableElement, XYTransform } from "../data/dataset";
 import { type DataSource, type SourceSpec, createDataSource } from "../data/stores";
+import { extent, percentiles, readStringArray, toNumberArray } from "./anndata";
 import { type ColumnLayout, forEachRow, parseColor, resolveLayout } from "./csv";
 import { UniformGrid } from "./grid";
 import { wkbReadRing, wkbVertexCount } from "./wkb";
@@ -46,34 +47,6 @@ export interface GroupSetSummary {
   /** Rows whose cell id was not found in the table. */
   unmatched: number;
   elapsedMs: number;
-}
-
-const PERCENTILE_BINS = 2048;
-
-/**
- * Percentile bounds from a histogram.
- *
- * Xenium obs columns (transcript counts especially) have long tails, so a
- * min/max colour range leaves almost every cell at the bottom of the ramp.
- */
-function percentiles(values: Float32Array, min: number, max: number) {
-  if (!(max > min)) return { p1: min, p99: max };
-  const bins = new Uint32Array(PERCENTILE_BINS);
-  const scale = PERCENTILE_BINS / (max - min);
-  for (let i = 0; i < values.length; i++) {
-    const bin = (values[i] - min) * scale;
-    bins[bin >= PERCENTILE_BINS ? PERCENTILE_BINS - 1 : bin < 0 ? 0 : bin | 0]++;
-  }
-  const at = (p: number) => {
-    let seen = 0;
-    const target = values.length * p;
-    for (let b = 0; b < PERCENTILE_BINS; b++) {
-      seen += bins[b];
-      if (seen >= target) return min + (b / PERCENTILE_BINS) * (max - min);
-    }
-    return max;
-  };
-  return { p1: at(0.01), p99: at(0.99) };
 }
 
 export interface BoundarySummary {
@@ -130,27 +103,6 @@ interface Boundaries {
 
 /** Grid bucket size in level-0 pixels (~435 µm) — a few hundred cells each. */
 const GRID_CELL_PX = 2048;
-
-function toNumberArray(data: unknown, length: number): Float32Array {
-  const out = new Float32Array(length);
-  if (data instanceof BigInt64Array || data instanceof BigUint64Array) {
-    for (let i = 0; i < length; i++) out[i] = Number(data[i]);
-  } else if (ArrayBuffer.isView(data)) {
-    out.set(data as unknown as ArrayLike<number>);
-  } else if (Array.isArray(data)) {
-    for (let i = 0; i < length; i++) out[i] = Number(data[i]);
-  }
-  return out;
-}
-
-/** Reads AnnData's string-ish encodings into a plain array of strings. */
-function toStringArray(data: unknown, length: number): string[] {
-  if (Array.isArray(data)) return data as string[];
-  const out = new Array<string>(length);
-  const indexable = data as { get(i: number): unknown };
-  for (let i = 0; i < length; i++) out[i] = String(indexable.get(i));
-  return out;
-}
 
 class CellStore implements CellsWorkerApi {
   #source!: DataSource;
@@ -242,12 +194,7 @@ class CellStore implements CellsWorkerApi {
     const arr = await this.#open(spec.path);
     const { data } = await zarr.get(arr);
     const values = toNumberArray(data, this.#n);
-    let min = Number.POSITIVE_INFINITY;
-    let max = Number.NEGATIVE_INFINITY;
-    for (let i = 0; i < values.length; i++) {
-      if (values[i] < min) min = values[i];
-      if (values[i] > max) max = values[i];
-    }
+    const { min, max } = extent(values);
     return { kind: "numeric", values, min, max, ...percentiles(values, min, max) };
   }
 
@@ -276,18 +223,11 @@ class CellStore implements CellsWorkerApi {
     }
   }
 
-  /**
-   * Reads a string column, transparently handling AnnData's
-   * `nullable-string-array` layout (a `values` child plus a `mask`).
-   */
+  /** Memoized string column read; the ids are re-read by several callers. */
   #stringColumn(path: string): Promise<string[]> {
     let pending = this.#strings.get(path);
     if (!pending) {
-      pending = (async () => {
-        const arr = await this.#open(`${path}/values`).catch(() => this.#open(path));
-        const { data, shape } = await zarr.get(arr);
-        return toStringArray(data, shape[0]);
-      })();
+      pending = readStringArray(this.#store, path);
       this.#strings.set(path, pending);
     }
     return pending;

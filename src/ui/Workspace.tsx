@@ -4,8 +4,10 @@ import { useApp } from "../store";
 import { CellInspector } from "./CellInspector";
 import { CellsPanel } from "./CellsPanel";
 import { DatasetSummary } from "./DatasetSummary";
+import { GenesPanel } from "./GenesPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { ImagePanel } from "./ImagePanel";
+import { TranscriptsPanel } from "./TranscriptsPanel";
 
 /**
  * The whole ready-state UI, in its own module so `App` can lazy-load it.
@@ -34,6 +36,8 @@ export function Workspace({ dataset }: { dataset: Dataset }) {
           <ImagePanel />
           <CellsPanel />
           <GroupsPanel />
+          <GenesPanel />
+          <TranscriptsPanel />
           <CellInspector />
           <DatasetSummary />
         </aside>

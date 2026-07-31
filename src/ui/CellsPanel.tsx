@@ -107,7 +107,7 @@ export function CellsPanel() {
               void setCellColoring(
                 e.target.value
                   ? {
-                      mode: mode as "column" | "group",
+                      mode: mode as "column" | "group" | "gene",
                       column: rest.join(":"),
                       range: undefined,
                     }
@@ -116,6 +116,13 @@ export function CellsPanel() {
             }}
           >
             <option value="">Uniform</option>
+            {/* Only the current gene is listed: there are thousands, and the
+                Genes panel is where one gets picked. */}
+            {coloring.mode === "gene" && coloring.column && (
+              <optgroup label="Gene">
+                <option value={`gene:${coloring.column}`}>{coloring.column}</option>
+              </optgroup>
+            )}
             {groupSets.length > 0 && (
               <optgroup label="Cell groups">
                 {groupSets.map((g) => (

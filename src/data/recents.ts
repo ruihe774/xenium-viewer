@@ -20,6 +20,12 @@ export interface StoredSettings {
   cellOpacity?: number;
   imageOpacity?: number;
   cellColoring?: CellColoring;
+  showTranscripts?: boolean;
+  transcriptPointSize?: number;
+  transcriptOpacity?: number;
+  /** Genes the user gave their own colour, by name — stable for a dataset. */
+  transcriptGenes?: string[];
+  hideOtherTranscripts?: boolean;
 }
 
 /**

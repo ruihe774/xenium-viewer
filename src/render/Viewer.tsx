@@ -8,7 +8,13 @@ import { Minimap } from "../ui/Minimap";
 import { ScaleBar } from "../ui/ScaleBar";
 import { ImagePyramid } from "./ZarrPixelSource";
 import { buildBoundaryLayers } from "./boundaryLayers";
+import {
+  buildTranscriptLayers,
+  buildTranscriptLut,
+  expandTranscriptColors,
+} from "./transcriptLayers";
 import { useBoundaries } from "./useBoundaries";
+import { useTranscripts } from "./useTranscripts";
 
 const VIEW = new OrthographicView({ id: "ortho", controller: { inertia: 250 } });
 
@@ -67,6 +73,12 @@ export function Viewer() {
   const cellColoring = useApp((s) => s.cellColoring);
   const selectedCell = useApp((s) => s.selectedCell);
   const selectCell = useApp((s) => s.selectCell);
+  const genes = useApp((s) => s.genes);
+  const showTranscripts = useApp((s) => s.showTranscripts);
+  const transcriptPointSize = useApp((s) => s.transcriptPointSize);
+  const transcriptOpacity = useApp((s) => s.transcriptOpacity);
+  const transcriptGenes = useApp((s) => s.transcriptGenes);
+  const hideOtherTranscripts = useApp((s) => s.hideOtherTranscripts);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -209,6 +221,42 @@ export function Viewer() {
     showCells && showNucleusBoundaries,
     viewBounds,
   );
+
+  const transcripts = useTranscripts(showTranscripts, viewBounds);
+
+  const transcriptLayers = useMemo(() => {
+    if (!transcripts.points) return [];
+    // Colours are resolved here rather than in the worker so that changing the
+    // highlighted genes recolours what is already on screen instead of
+    // re-running the viewport query.
+    const highlighted = transcriptGenes.map((name) => genes.indexOf(name));
+    const lut = buildTranscriptLut(genes.length, highlighted, hideOtherTranscripts);
+    const colors = expandTranscriptColors(transcripts.points.codes, lut, genes.length);
+    return buildTranscriptLayers({
+      points: transcripts.points,
+      colors,
+      pointSize: transcriptPointSize,
+      opacity: transcriptOpacity,
+    });
+  }, [
+    transcripts.points,
+    genes,
+    transcriptGenes,
+    hideOtherTranscripts,
+    transcriptPointSize,
+    transcriptOpacity,
+  ]);
+
+  const setTranscriptStatus = useApp((s) => s.setTranscriptStatus);
+  useEffect(() => {
+    setTranscriptStatus({
+      loading: transcripts.loading,
+      tooMany: transcripts.tooMany,
+      count: transcripts.count,
+      total: transcripts.total,
+      error: transcripts.error,
+    });
+  }, [setTranscriptStatus, transcripts]);
 
   const boundaryLayers = useMemo(() => {
     if (!showCells) return [];
@@ -363,11 +411,23 @@ export function Viewer() {
         // runs to gigabytes on a whole-slide view. Cap it instead.
         maxCacheSize: TILE_CACHE_SIZE,
       }),
+      // Transcripts sit under the cell layers: boundaries and centroids are the
+      // things you click, and a dense point cloud would otherwise bury them.
+      ...transcriptLayers,
       ...boundaryLayers,
       ...cellLayers,
       ...selectionLayer,
     ];
-  }, [pyramid, channels, selections, imageOpacity, boundaryLayers, cellLayers, selectionLayer]);
+  }, [
+    pyramid,
+    channels,
+    selections,
+    imageOpacity,
+    transcriptLayers,
+    boundaryLayers,
+    cellLayers,
+    selectionLayer,
+  ]);
 
   /**
    * Hover readout. Boundary layers index by polygon, so they carry their own

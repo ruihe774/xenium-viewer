@@ -80,10 +80,11 @@ screenshots reproducible. Omit them to fit the whole slide.
 
 ```
 src/
-  data/      store backends, dataset model, settings, cells worker client
-  workers/   image tiles, cell table + geometry, WKB, spatial grid, CSV
+  data/      store backends, dataset model, recents + settings, worker clients
+  workers/   image tiles, cell table + geometry, expression, transcripts,
+             AnnData helpers, WKB, spatial grid, CSV
   render/    Viv pixel source, deck.gl layers, the viewer component
-  ui/        panels, colormaps, minimap, scale bar
+  ui/        panels, gene list, colormaps, minimap, scale bar
   store.ts   zustand; single source of truth for all display state
 ```
 
@@ -96,6 +97,10 @@ Two workers do the heavy lifting, and both keep their bulk data worker-side:
 - **`workers/cells.worker.ts`** — the cell table, boundary geometry (~120 MB of flat
   `Float32Array`), and imported group assignments. Only the polygons intersecting the current
   viewport cross to the main thread, chosen via a uniform grid over bounding boxes.
+- **`workers/expression.worker.ts`** — `X` in a compact resident CSR (~445 MB), read lazily
+  the first time a gene is picked. Only the requested gene's dense column crosses back.
+- **`workers/transcripts.worker.ts`** — a row-group index over the 69 transcript parquet
+  parts, plus an LRU of decoded row groups (256 MB). Only the points in view cross back.
 
 **Everything renders in level-0 image pixels.** Shapes, centroids and transcripts are stored
 in micrometres; the scale factor in the shapes element's `coordinateTransformations` converts
@@ -115,6 +120,35 @@ decode to strings.
 
 **deck.gl's tile cache defaults to 5× the visible tile count**, which reached ~2 GB on a
 whole-slide view. `maxCacheSize` is capped explicitly in `Viewer.tsx`.
+
+**Gene ids ascend within each CSR row**, which is the whole reason `geneValues` can binary-
+search a gene's column out of a row-major matrix in ~17 ms. No CSC transpose exists and none
+should be added — it would cost a second copy of a 154M-element index for nothing. The
+property is verified once after loading (`#checkSorted`) and falls back to a linear scan if a
+store ever violates it.
+
+**`X/data` holds small integers**, max 1495 on the sample slide with 0.007% above 255, which
+is what makes the `Uint8Array` + overflow-map storage safe. The worker samples three slices
+before committing to it and falls back to `Float32Array` for anything non-integer — a
+normalised or log-transformed matrix would otherwise be silently truncated.
+
+**`points.feature_name` and `var/_index` are different vocabularies** — 9,716 categories
+against 5,101 genes, the surplus being control probes and deprecated codewords. Points are
+coded by name lookup into `var`, with `UNKNOWN_FEATURE` for the rest. Never index one by the
+other positionally.
+
+**The transcripts worker must not start before the gene list is read.** Its feature→gene
+coding is baked into the row groups it caches, so an empty list would silently mark every
+transcript unknown. `initTranscripts` awaits `genesPending` for exactly this reason.
+
+**Transcript row groups all carry x/y statistics**, and the viewport gate is an area-weighted
+estimate over them. That is what keeps a zoomed-out view free: the decision to draw nothing is
+made from the footers, without decoding any parquet. Dropping the projection (`x`, `y`,
+`feature_name` only) or the row-group index makes a pan read gigabytes.
+
+**Multi-part parquet needs a directory listing, and HTTP has none.** `FileSystemStore`
+enumerates properly; the fetch backend probes `part.N.parquet` in batches until the first gap,
+which works because dask names parts contiguously from zero.
 
 **Viv's `selections` array identity must be stable.** Viv refetches every raster and drops its
 tile cache whenever it changes, so it is memoized on channel _count_, not on the channel
@@ -193,8 +227,11 @@ document
 gesture on a native dialog. Ask the user to test that path when it is touched.
 
 Reference timings on the sample slide, for spotting regressions: centroids ~250 ms, channel
-stats ~1.0 s, cell boundaries ~1.4 s (606,931 polygons / 15.2M vertices), heap ~210 MB at
-whole-slide view and ~570 MB at native resolution.
+stats ~1.0 s, cell boundaries ~1.4 s (606,931 polygons / 15.2M vertices), expression matrix
+~4.3 s (154,647,224 non-zeros, 445 MB resident), gene switch 15–18 ms, transcript row-group
+index ~2.8 s (69 parts / 417 row groups), one transcript row group ~180 ms. Heap ~210 MB at
+whole-slide view and ~570 MB at native resolution — the expression matrix and the transcript
+cache are in worker heaps and do not show up there.
 
 ## Conventions
 
@@ -204,12 +241,11 @@ whole-slide view and ~570 MB at native resolution.
   constraints above are all documented at their call sites too — keep those in sync.
 - Tuning constants (cache sizes, tile size, polygon caps, zoom thresholds) are named
   module-level constants with a comment giving the reasoning, not inline magic numbers.
-- Display state lives in `store.ts` and is persisted per dataset via `data/settings.ts`.
+- Display state lives in `store.ts` and is persisted per dataset via `data/recents.ts`.
   Persist user choices only — never derived data such as histograms, thumbnails or colour
   buffers.
 
 ## Deliberately out of scope
 
-Transcript rendering (402.7M points) and per-cell gene expression. `X` is CSR over cells, so
-reading one gene's column means scanning all 154M non-zeros — it needs a different access
-pattern than anything here. The layer and colouring plumbing is shaped to accept both later.
+Writing anything back to the store, and any coordinate transform beyond scale/translation
+(`readXYTransform` throws on affine and rotation rather than misplacing data).

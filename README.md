@@ -111,13 +111,23 @@ every byte ≥ 0x80), and the rings go straight into flat `Float32Array`s — 60
 the viewport cross to the main thread, selected via a uniform grid over bounding boxes. Above
 40,000 polygons in view the layer falls back to centroid dots.
 
-**Coordinates.** Everything renders in level-0 image pixels. Shapes and centroids are stored in
-micrometres, so the scale factor from the shapes element's `coordinateTransformations` is what
-converts them — and its reciprocal is the pixel size (0.2125 µm for the reference slide) that
-drives the scale bar.
+**Gene expression.** `X` is CSR over cells, so a gene's column is scattered across all 154M
+non-zeros. Rather than build a transpose, the matrix is read once into a worker in a compact
+form — gene ids as `uint16`, counts as bytes with a side map for the 0.007% above 255 — which
+is 445 MB and takes about 4 s. Because each CSR row's gene ids ascend, a per-row binary search
+then pulls a whole column out in 15–18 ms, so switching genes is interactive. The inspector's
+per-cell gene list does not wait on any of that: a CSR row is contiguous, and the sharding
+codec turns it into a single ~600 KB fetch, about 6 ms.
 
-## Not included
+**Transcripts.** 402.7M points across 69 parquet parts and 7.1 GB, so none of it is loaded.
+Every row group's x/y statistics are read from the footers once (417 of them, ~2.8 s), and a
+viewport query decodes only the row groups it overlaps — a 1000×1000 µm view touches 8. Only
+`x`, `y` and `feature_name` are projected, 5.2 compressed bytes per row against ~18 for the
+full schema. Decoded row groups are cached in the worker, capped at 256 MB. Above 1.5M points
+in view nothing is drawn: the estimate comes from the footers, so an over-full viewport costs
+no decoding at all.
 
-Transcript rendering and per-cell gene expression are deliberately out of scope for this build.
-Expression would need a different access pattern: `X` is CSR over cells, so pulling one gene's
-column means scanning all 154M non-zeros. The layer plumbing is shaped to accept both later.
+**Coordinates.** Everything renders in level-0 image pixels. Shapes, centroids and transcripts
+are stored in micrometres, so the scale factor from the element's `coordinateTransformations`
+is what converts them — and its reciprocal is the pixel size (0.2125 µm for the reference
+slide) that drives the scale bar.

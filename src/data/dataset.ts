@@ -132,10 +132,50 @@ export interface ShapeElement {
   toPixel: XYTransform;
 }
 
+/**
+ * Code for a point whose feature is not a row of the table's `var`.
+ *
+ * The sample slide's transcripts carry 9,716 distinct feature names against
+ * 5,101 genes in the table — the surplus is control probes, deprecated
+ * codewords and unpanelled entries. They are kept and drawn in a neutral
+ * colour rather than dropped, but they can never be indexed into the gene
+ * list, so the two must never be indexed by one another.
+ *
+ * Lives here rather than in the transcripts worker because both sides of that
+ * boundary need it, and importing a value from a `?worker` module would run
+ * the worker on the main thread.
+ */
+export const UNKNOWN_FEATURE = 0xffff;
+
+export interface PointsElement {
+  name: string;
+  path: string;
+  /** Directory (or single file) holding the points, relative to the store root. */
+  parquetPath: string;
+  toPixel: XYTransform;
+  /** Column naming what each point is, e.g. `feature_name`. */
+  featureKey: string;
+  /** Column linking a point back to a row of the table, e.g. `cell_id`. */
+  instanceKey?: string;
+}
+
 export type ObsColumn =
   | { name: string; kind: "numeric"; path: string; dtype: string }
   | { name: string; kind: "categorical"; path: string }
   | { name: string; kind: "string"; path: string };
+
+/**
+ * The expression matrix, when it is CSR over cells — the only layout we read.
+ * Dense and CSC `X` are left undefined rather than throwing, so the rest of the
+ * dataset still opens and only the gene features go missing.
+ */
+export interface XMatrix {
+  path: string;
+  /** Non-zeros, from the length of `X/data`. */
+  nnz: number;
+  nObs: number;
+  nVar: number;
+}
 
 export interface TableElement {
   path: string;
@@ -148,6 +188,7 @@ export interface TableElement {
   /** Path to `var/_index` (gene names). */
   varIndexPath?: string;
   nVar?: number;
+  x?: XMatrix;
 }
 
 export interface Dataset {
@@ -156,6 +197,7 @@ export interface Dataset {
   images: ImageElement[];
   labels: ImageElement[];
   shapes: ShapeElement[];
+  points: PointsElement[];
   table?: TableElement;
   /** Physical size of one level-0 image pixel, in micrometres. */
   pixelSizeUm: number;
@@ -279,6 +321,8 @@ function readTable(nodes: NodeIndex, path: string): TableElement | undefined {
       ? `${path}/var/${varIndexName}`
       : undefined;
 
+  const nVar = nodes.get(`${path}/var/${varIndexName}/values`)?.shape?.[0];
+
   return {
     path,
     nObs,
@@ -286,8 +330,33 @@ function readTable(nodes: NodeIndex, path: string): TableElement | undefined {
     columns,
     spatialPath: nodes.has(`${path}/obsm/spatial`) ? `${path}/obsm/spatial` : undefined,
     varIndexPath,
-    nVar: nodes.get(`${path}/var/${varIndexName}/values`)?.shape?.[0],
+    nVar,
+    x: readXMatrix(nodes, `${path}/X`, nObs, nVar),
   };
+}
+
+/**
+ * Describes `X` when it is a CSR matrix over cells.
+ *
+ * AnnData records the logical shape on the group and stores `data`, `indices`
+ * and `indptr` beside it. Anything else — dense arrays, CSC — returns undefined
+ * so the caller can hide the gene features rather than fail to open the store.
+ */
+function readXMatrix(
+  nodes: NodeIndex,
+  path: string,
+  nObs: number,
+  nVar: number | undefined,
+): XMatrix | undefined {
+  const node = nodes.get(path);
+  if (!node || attr<string>(node, "encoding-type") !== "csr_matrix") return undefined;
+  const shape = attr<number[]>(node, "shape");
+  const nnz = nodes.get(`${path}/data`)?.shape?.[0];
+  if (!shape || nnz === undefined) return undefined;
+  if (!nodes.has(`${path}/indices`) || !nodes.has(`${path}/indptr`)) return undefined;
+  // The group's own shape wins; obs/var are only a cross-check for stores that
+  // omit it.
+  return { path, nnz, nObs: shape[0] ?? nObs, nVar: shape[1] ?? nVar ?? 0 };
 }
 
 /** Thrown for stores we can read but deliberately do not support. */
@@ -338,6 +407,27 @@ export async function loadDataset(source: DataSource): Promise<Dataset> {
     });
   }
 
+  const points: PointsElement[] = [];
+  for (const name of childNames(nodes, "points")) {
+    const path = `points/${name}`;
+    const node = nodes.get(path);
+    if (!node) continue;
+    const attrs = attr<{ feature_key?: string; instance_key?: string }>(node, "spatialdata_attrs");
+    points.push({
+      name,
+      path,
+      parquetPath: `${path}/points.parquet`,
+      // Points carry three axes; readXYTransform indexes the scale by the
+      // position of x/y within the element's own axes, so z is ignored.
+      toPixel: readXYTransform(
+        attr(node, "coordinateTransformations"),
+        attr<string[]>(node, "axes") ?? ["x", "y"],
+      ),
+      featureKey: attrs?.feature_key ?? "feature_name",
+      instanceKey: attrs?.instance_key,
+    });
+  }
+
   const tableName = childNames(nodes, "tables")[0];
   const table = tableName ? readTable(nodes, `tables/${tableName}`) : undefined;
 
@@ -358,6 +448,7 @@ export async function loadDataset(source: DataSource): Promise<Dataset> {
     images,
     labels,
     shapes,
+    points,
     table,
     pixelSizeUm,
     width: primary.width,

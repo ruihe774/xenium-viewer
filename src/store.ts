@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import { CellsClient, type ColumnData } from "./data/cells";
 import { type Dataset, loadDataset } from "./data/dataset";
+import { ExpressionClient, type GeneCount } from "./data/expression";
 import { saveRecentSettings, touchRecent, type StoredSettings } from "./data/recents";
 import { type DataSource, type SourceSpec, createDataSource } from "./data/stores";
+import { TranscriptsClient, type TranscriptsInit } from "./data/transcripts";
 import { categoryColor, sampleColormap } from "./ui/colormaps";
 
 export interface ChannelSettings {
@@ -30,12 +32,13 @@ const DEFAULT_CHANNEL_COLORS: [number, number, number][] = [
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
 /**
- * How the cells layer is coloured. `column` names an obs column; `group` names
- * an imported cell-group set. They are separate modes because the two
- * namespaces can collide — a file may well be called `segmentation_method`.
+ * How the cells layer is coloured. `column` names an obs column, `group` an
+ * imported cell-group set, and `gene` a row of `var`. They are separate modes
+ * because the namespaces can collide — a file may well be called
+ * `segmentation_method`, and a gene may share a name with an obs column.
  */
 export interface CellColoring {
-  mode: "uniform" | "column" | "group";
+  mode: "uniform" | "column" | "group" | "gene";
   column?: string;
   colormap: string;
   /** Value window for numeric columns; ignored for categorical ones. */
@@ -66,6 +69,25 @@ export interface CellsState {
   ids?: string[];
 }
 
+/** Progress of the one-off `X` read that backs colouring by gene. */
+export interface MatrixStatus {
+  status: LoadStatus;
+  /** 0..1 while loading. */
+  progress: number;
+  error?: string;
+}
+
+export interface TranscriptStatus {
+  loading: boolean;
+  /** Viewport holds more points than we draw. */
+  tooMany: boolean;
+  /** Points drawn. */
+  count: number;
+  /** Points in the viewport, before the cap. */
+  total: number;
+  error?: string;
+}
+
 export interface AppState {
   status: LoadStatus;
   error?: string;
@@ -93,10 +115,27 @@ export interface AppState {
   groupImporting: boolean;
   selectedCell?: number;
   cellDetails?: Record<string, string>;
+  /** Highest-expressed genes in the selected cell. */
+  selectedCellGenes?: GeneCount[];
   /** Mirrored from the viewer so the panel can report boundary progress. */
   boundaryStatus: BoundaryStatus;
   /** False once contrast comes from saved settings rather than the data. */
   autoContrast: boolean;
+
+  expressionClient?: ExpressionClient;
+  /** Gene names from `var`, in column order. Empty when there is no `X`. */
+  genes: string[];
+  matrixStatus: MatrixStatus;
+
+  transcriptsClient?: TranscriptsClient;
+  transcriptInfo?: TranscriptsInit;
+  showTranscripts: boolean;
+  transcriptPointSize: number;
+  transcriptOpacity: number;
+  /** Genes given their own colour; everything else is drawn neutral or hidden. */
+  transcriptGenes: string[];
+  hideOtherTranscripts: boolean;
+  transcriptStatus: TranscriptStatus;
 
   open: (spec: SourceSpec) => Promise<void>;
   setChannel: (index: number, patch: Partial<ChannelSettings>) => void;
@@ -114,6 +153,14 @@ export interface AppState {
   toggleGroupCategory: (name: string, category: string) => void;
   setGroupCategoriesHidden: (name: string, hidden: string[]) => void;
   selectCell: (index?: number) => Promise<void>;
+  loadExpressionMatrix: () => Promise<void>;
+  initTranscripts: () => Promise<void>;
+  setShowTranscripts: (value: boolean) => void;
+  setTranscriptPointSize: (value: number) => void;
+  setTranscriptOpacity: (value: number) => void;
+  toggleTranscriptGene: (gene: string) => void;
+  setHideOtherTranscripts: (value: boolean) => void;
+  setTranscriptStatus: (value: TranscriptStatus) => void;
   reset: () => void;
 }
 
@@ -134,6 +181,16 @@ const IDLE_BOUNDARIES: BoundaryStatus = {
   dotsVisible: false,
   count: 0,
 };
+const IDLE_MATRIX: MatrixStatus = { status: "idle", progress: 0 };
+const IDLE_TRANSCRIPTS: TranscriptStatus = {
+  loading: false,
+  tooMany: false,
+  count: 0,
+  total: 0,
+};
+
+/** Genes listed for the selected cell in the inspector. */
+const TOP_GENES = 10;
 
 /** Colour for a category: the source's own, else the fallback palette. */
 function colorForCategory(column: ColumnData, code: number): [number, number, number] {
@@ -217,6 +274,16 @@ function hiddenFor(state: AppState, coloring: CellColoring): Set<string> | undef
 const PERSIST_DEBOUNCE_MS = 400;
 let persistTimer: ReturnType<typeof setTimeout> | undefined;
 
+// Both of these are one-off loads shared by every caller that needs them, and
+// both outlive a single action, so the in-flight promise lives beside the
+// store rather than in it. Cleared whenever a dataset is opened or closed.
+let matrixPending: Promise<void> | undefined;
+let transcriptsPending: Promise<void> | undefined;
+// The transcripts worker codes its points against the gene list, so it must not
+// start before the names are read — otherwise every feature codes as unknown
+// and the mapping is baked into the decoded row groups it caches.
+let genesPending: Promise<void> | undefined;
+
 /** Saves the current display preferences into the open dataset's recent record. */
 function persist(state: AppState): void {
   if (!state.recentId) return;
@@ -234,6 +301,11 @@ function persist(state: AppState): void {
     cellOpacity: state.cellOpacity,
     imageOpacity: state.imageOpacity,
     cellColoring: state.cellColoring,
+    showTranscripts: state.showTranscripts,
+    transcriptPointSize: state.transcriptPointSize,
+    transcriptOpacity: state.transcriptOpacity,
+    transcriptGenes: state.transcriptGenes,
+    hideOtherTranscripts: state.hideOtherTranscripts,
   };
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
@@ -258,12 +330,28 @@ export const useApp = create<AppState>((set, get) => ({
   uniformCellColor: [255, 255, 255],
   groupSets: [],
   groupImporting: false,
+  genes: [],
+  matrixStatus: IDLE_MATRIX,
+  showTranscripts: false,
+  // A dense field holds a few transcripts per screen pixel at cellular zoom, so
+  // anything larger than a 1 px radius at full opacity paints over the image
+  // entirely instead of showing where the signal is.
+  transcriptPointSize: 1,
+  transcriptOpacity: 0.55,
+  transcriptGenes: [],
+  hideOtherTranscripts: false,
+  transcriptStatus: IDLE_TRANSCRIPTS,
 
   async open(spec) {
     // React StrictMode double-invokes effects in development, and the auto-open
     // path runs from one — without this the whole dataset loads twice.
     if (get().status === "loading") return;
     get().cellsClient?.destroy();
+    get().expressionClient?.destroy();
+    get().transcriptsClient?.destroy();
+    matrixPending = undefined;
+    transcriptsPending = undefined;
+    genesPending = undefined;
     set({
       status: "loading",
       error: undefined,
@@ -274,8 +362,15 @@ export const useApp = create<AppState>((set, get) => ({
       cellsClient: undefined,
       selectedCell: undefined,
       cellDetails: undefined,
+      selectedCellGenes: undefined,
       groupSets: [],
       groupImportError: undefined,
+      expressionClient: undefined,
+      genes: [],
+      matrixStatus: IDLE_MATRIX,
+      transcriptsClient: undefined,
+      transcriptInfo: undefined,
+      transcriptStatus: IDLE_TRANSCRIPTS,
     });
     try {
       const source = createDataSource(spec);
@@ -295,7 +390,12 @@ export const useApp = create<AppState>((set, get) => ({
       // Group sets come from files the user picks each session, so a saved
       // colouring that points at one has nothing to resolve against.
       // Also, ignore boundaryStyle and cellOpacity in this case.
-      const restoreCellColoring = saved.cellColoring && saved.cellColoring.mode !== "group";
+      // A saved gene needs an `X` to resolve against for the same reason —
+      // without one the Genes panel is hidden and the choice is unclearable.
+      const restoreCellColoring =
+        saved.cellColoring &&
+        saved.cellColoring.mode !== "group" &&
+        (saved.cellColoring.mode !== "gene" || dataset.table?.x !== undefined);
       set({
         status: "ready",
         source,
@@ -313,9 +413,37 @@ export const useApp = create<AppState>((set, get) => ({
         cellColoring: restoreCellColoring
           ? saved.cellColoring
           : { mode: "uniform", colormap: "viridis" },
+        showTranscripts: saved.showTranscripts ?? false,
+        transcriptPointSize: saved.transcriptPointSize ?? 1,
+        transcriptOpacity: saved.transcriptOpacity ?? 0.55,
+        transcriptGenes: saved.transcriptGenes ?? [],
+        hideOtherTranscripts: saved.hideOtherTranscripts ?? false,
       });
 
+      // Transcripts do not need a table; the gene list only labels their
+      // features, and an unlabelled point still draws.
+      if (dataset.points.length > 0) set({ transcriptsClient: new TranscriptsClient() });
+
       if (!dataset.table) return;
+
+      // Only the gene names are read here — `X` itself is left alone until
+      // something actually asks for a gene. Started before the centroids
+      // because the transcripts worker cannot begin without the names, and the
+      // two reads are independent.
+      if (dataset.table.x) {
+        const expressionClient = new ExpressionClient();
+        set({ expressionClient });
+        genesPending = expressionClient.init(spec, dataset).then(
+          ({ genes }) => set({ genes }),
+          (err: unknown) => {
+            // A malformed `X` should cost the gene features, not the dataset.
+            console.warn("[expression] unavailable:", err);
+            expressionClient.destroy();
+            set({ expressionClient: undefined });
+          },
+        );
+      }
+
       const cellsClient = new CellsClient();
       set({ cellsClient, cells: { status: "loading", n: 0 } });
       try {
@@ -333,9 +461,14 @@ export const useApp = create<AppState>((set, get) => ({
             colors: buildColors(get().cellColoring, undefined, n, get().uniformCellColor),
           },
         });
-        // A restored colour column can only be fetched once the worker has the
-        // table open, which is now.
-        if (get().cellColoring.mode === "column") await get().setCellColoring({});
+
+        // A restored colour column or gene can only be fetched once the worker
+        // has the table open, which is now.
+        await genesPending;
+        const restoredMode = get().cellColoring.mode;
+        if (restoredMode === "column" || restoredMode === "gene") {
+          await get().setCellColoring({});
+        }
         // Cell ids are only needed for the hover tooltip, so fetch them in the
         // background rather than delaying the "ready" state.
         void cellsClient.ids().then((ids) => {
@@ -429,7 +562,17 @@ export const useApp = create<AppState>((set, get) => ({
         coloring.mode !== state.cellColoring.mode ||
         !columnData;
       if (changed) {
-        columnData = await cellsClient?.column(coloring.column);
+        if (coloring.mode === "gene") {
+          // The first gene picked pays for reading X; every one after is a
+          // per-row binary search in the worker.
+          await get().loadExpressionMatrix();
+          columnData =
+            get().matrixStatus.status === "ready"
+              ? await get().expressionClient?.geneValues(coloring.column)
+              : undefined;
+        } else {
+          columnData = await cellsClient?.column(coloring.column);
+        }
         if (columnData?.kind === "numeric" && !patch.range) {
           coloring.range = [columnData.p1, columnData.p99];
         }
@@ -532,17 +675,133 @@ export const useApp = create<AppState>((set, get) => ({
 
   async selectCell(index) {
     if (index === undefined) {
-      set({ selectedCell: undefined, cellDetails: undefined });
+      set({ selectedCell: undefined, cellDetails: undefined, selectedCellGenes: undefined });
       return;
     }
-    set({ selectedCell: index, cellDetails: undefined });
-    const details = await get().cellsClient?.details(index);
+    set({ selectedCell: index, cellDetails: undefined, selectedCellGenes: undefined });
+    const { cellsClient, expressionClient } = get();
+    const [details, genes] = await Promise.all([
+      cellsClient?.details(index),
+      // A CSR row is contiguous, so this does not wait on the full matrix. It
+      // must not take the details down with it if X is unreadable.
+      expressionClient?.cellGenes(index, TOP_GENES).catch(() => undefined),
+    ]);
     // Ignore a slow response for a cell the user has already moved off.
-    if (get().selectedCell === index) set({ cellDetails: details });
+    if (get().selectedCell === index) set({ cellDetails: details, selectedCellGenes: genes });
+  },
+
+  loadExpressionMatrix() {
+    const client = get().expressionClient;
+    if (!client) return Promise.resolve();
+    matrixPending ??= (async () => {
+      set({ matrixStatus: { status: "loading", progress: 0 } });
+      try {
+        const summary = await client.loadMatrix((progress) => {
+          set({ matrixStatus: { status: "loading", progress } });
+        });
+        console.info(
+          `[expression] ${summary.nnz.toLocaleString("en-US")} non-zeros, ` +
+            `${Math.round(summary.bytes / 1048576)} MB resident, ` +
+            `${summary.compact ? "byte counts" : "float values"}` +
+            `${summary.sorted ? "" : ", unsorted rows (linear lookup)"} ` +
+            `in ${summary.elapsedMs} ms`,
+        );
+        set({ matrixStatus: { status: "ready", progress: 1 } });
+      } catch (err) {
+        // Let a later attempt retry rather than latching the failure.
+        matrixPending = undefined;
+        set({
+          matrixStatus: {
+            status: "error",
+            progress: 0,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+      }
+    })();
+    return matrixPending;
+  },
+
+  initTranscripts() {
+    const { transcriptsClient, dataset, source } = get();
+    const element = dataset?.points[0];
+    if (!transcriptsClient || !element || !source) return Promise.resolve();
+    transcriptsPending ??= (async () => {
+      try {
+        // The gene list codes the points, and that coding is baked into the
+        // row groups the worker caches, so it has to be right the first time.
+        await genesPending;
+        const info = await transcriptsClient.init(source.spec, element, get().genes);
+        console.info(
+          `[transcripts] ${info.totalRows.toLocaleString("en-US")} points across ` +
+            `${info.parts} parts / ${info.rowGroups} row groups in ${info.elapsedMs} ms`,
+        );
+        set({ transcriptInfo: info });
+      } catch (err) {
+        transcriptsPending = undefined;
+        set((s) => ({
+          transcriptStatus: {
+            ...s.transcriptStatus,
+            loading: false,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        }));
+      }
+    })();
+    return transcriptsPending;
+  },
+
+  setShowTranscripts(value) {
+    set({ showTranscripts: value });
+    persist(get());
+  },
+
+  setTranscriptPointSize(value) {
+    set({ transcriptPointSize: value });
+    persist(get());
+  },
+
+  setTranscriptOpacity(value) {
+    set({ transcriptOpacity: value });
+    persist(get());
+  },
+
+  toggleTranscriptGene(gene) {
+    set((s) => ({
+      transcriptGenes: s.transcriptGenes.includes(gene)
+        ? s.transcriptGenes.filter((g) => g !== gene)
+        : [...s.transcriptGenes, gene],
+    }));
+    persist(get());
+  },
+
+  setHideOtherTranscripts(value) {
+    set({ hideOtherTranscripts: value });
+    persist(get());
+  },
+
+  setTranscriptStatus(value) {
+    // Same reasoning as setBoundaryStatus: this fires on every viewport tick.
+    const prev = get().transcriptStatus;
+    if (
+      prev.loading === value.loading &&
+      prev.tooMany === value.tooMany &&
+      prev.count === value.count &&
+      prev.total === value.total &&
+      prev.error === value.error
+    ) {
+      return;
+    }
+    set({ transcriptStatus: value });
   },
 
   reset() {
     get().cellsClient?.destroy();
+    get().expressionClient?.destroy();
+    get().transcriptsClient?.destroy();
+    matrixPending = undefined;
+    transcriptsPending = undefined;
+    genesPending = undefined;
     set({
       status: "idle",
       error: undefined,
@@ -554,8 +813,15 @@ export const useApp = create<AppState>((set, get) => ({
       cellsClient: undefined,
       selectedCell: undefined,
       cellDetails: undefined,
+      selectedCellGenes: undefined,
       groupSets: [],
       groupImportError: undefined,
+      expressionClient: undefined,
+      genes: [],
+      matrixStatus: IDLE_MATRIX,
+      transcriptsClient: undefined,
+      transcriptInfo: undefined,
+      transcriptStatus: IDLE_TRANSCRIPTS,
     });
   },
 }));
