@@ -79,7 +79,7 @@ export function CellsPanel() {
               ? "Loading boundaries…"
               : boundaryStatus.tooMany
                 ? boundaryStatus.dotsVisible
-                  ? "Too many cells in view for outlines — showing centroids."
+                  ? "Showing centroids."
                   : "Zoom in to see cell boundaries."
                 : "Boundaries loaded.")}
         </p>
