@@ -3,6 +3,7 @@ import { useApp } from "../store";
 import { CellInspector } from "./CellInspector";
 import { CellsPanel } from "./CellsPanel";
 import { DatasetSummary } from "./DatasetSummary";
+import { GroupsPanel } from "./GroupsPanel";
 import { ImagePanel } from "./ImagePanel";
 import { OpenDialog } from "./OpenDialog";
 
@@ -27,6 +28,7 @@ export function App() {
         <aside className="sidebar">
           <ImagePanel />
           <CellsPanel />
+          <GroupsPanel />
           <CellInspector />
           <DatasetSummary />
         </aside>

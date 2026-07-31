@@ -20,7 +20,8 @@ export interface BoundaryLayerOptions {
 
 /**
  * deck.gl wants colours per *vertex* when data is supplied in binary form, so
- * the per-cell colours are expanded across each polygon's vertices.
+ * the per-cell RGBA is expanded across each polygon's vertices. Alpha comes
+ * along for the ride, which is how hidden groups disappear.
  */
 function expandColors(
   shapes: Shapes,
@@ -28,17 +29,19 @@ function expandColors(
   fallback: [number, number, number],
 ): Uint8Array {
   const vertices = shapes.startIndices[shapes.count];
-  const out = new Uint8Array(vertices * 3);
+  const out = new Uint8Array(vertices * 4);
   for (let p = 0; p < shapes.count; p++) {
     const cell = shapes.cellIndices[p];
     const hasColor = cellColors && cell >= 0;
-    const r = hasColor ? cellColors[cell * 3] : fallback[0];
-    const g = hasColor ? cellColors[cell * 3 + 1] : fallback[1];
-    const b = hasColor ? cellColors[cell * 3 + 2] : fallback[2];
+    const r = hasColor ? cellColors[cell * 4] : fallback[0];
+    const g = hasColor ? cellColors[cell * 4 + 1] : fallback[1];
+    const b = hasColor ? cellColors[cell * 4 + 2] : fallback[2];
+    const a = hasColor ? cellColors[cell * 4 + 3] : 255;
     for (let v = shapes.startIndices[p]; v < shapes.startIndices[p + 1]; v++) {
-      out[v * 3] = r;
-      out[v * 3 + 1] = g;
-      out[v * 3 + 2] = b;
+      out[v * 4] = r;
+      out[v * 4 + 1] = g;
+      out[v * 4 + 2] = b;
+      out[v * 4 + 3] = a;
     }
   }
   return out;
@@ -56,8 +59,8 @@ export function buildBoundaryLayers(options: BoundaryLayerOptions): Layer[] {
     attributes: {
       getPolygon: { value: shapes.positions, size: 2 },
       getPath: { value: shapes.positions, size: 2 },
-      getFillColor: { value: colors, size: 3 },
-      getColor: { value: colors, size: 3 },
+      getFillColor: { value: colors, size: 4 },
+      getColor: { value: colors, size: 4 },
     },
   };
 

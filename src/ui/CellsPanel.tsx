@@ -23,6 +23,7 @@ export function CellsPanel() {
   const boundaryStyle = useApp((s) => s.boundaryStyle);
   const setBoundaryStyle = useApp((s) => s.setBoundaryStyle);
   const boundaryStatus = useApp((s) => s.boundaryStatus);
+  const groupSets = useApp((s) => s.groupSets);
   const coloring = useApp((s) => s.cellColoring);
   const setCellColoring = useApp((s) => s.setCellColoring);
 
@@ -94,21 +95,39 @@ export function CellsPanel() {
         <label className="field">
           <span>Colour by</span>
           <select
-            value={coloring.mode === "column" ? coloring.column : ""}
-            onChange={(e) =>
+            // Values are namespaced because an imported file can share a name
+            // with an obs column.
+            value={coloring.mode === "uniform" ? "" : `${coloring.mode}:${coloring.column}`}
+            onChange={(e) => {
+              const [mode, ...rest] = e.target.value.split(":");
               void setCellColoring(
                 e.target.value
-                  ? { mode: "column", column: e.target.value, range: undefined }
+                  ? {
+                      mode: mode as "column" | "group",
+                      column: rest.join(":"),
+                      range: undefined,
+                    }
                   : { mode: "uniform", column: undefined },
-              )
-            }
+              );
+            }}
           >
             <option value="">Uniform</option>
-            {columns.map((c) => (
-              <option key={c.name} value={c.name}>
-                {c.name}
-              </option>
-            ))}
+            {groupSets.length > 0 && (
+              <optgroup label="Cell groups">
+                {groupSets.map((g) => (
+                  <option key={g.name} value={`group:${g.name}`}>
+                    {g.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            <optgroup label="Table columns">
+              {columns.map((c) => (
+                <option key={c.name} value={`column:${c.name}`}>
+                  {c.name}
+                </option>
+              ))}
+            </optgroup>
           </select>
         </label>
 
@@ -144,7 +163,9 @@ export function CellsPanel() {
           </>
         )}
 
-        {column?.kind === "categorical" && (
+        {/* Group sets get a richer legend of their own, with counts and
+            per-group visibility, so it is not repeated here. */}
+        {column?.kind === "categorical" && coloring.mode !== "group" && (
           <ul className="legend">
             {column.categories.slice(0, 24).map((label, i) => (
               <li key={label}>

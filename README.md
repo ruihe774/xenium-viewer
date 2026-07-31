@@ -12,6 +12,8 @@ server component and no upload; the data is read directly off disk (or over HTTP
   dots when zoomed out, with nucleus boundaries as an optional overlay.
 - **Colour by any `obs` column** — numeric columns get a colormap with a percentile-based
   range you can adjust; categorical columns get a palette and legend.
+- **Cell groups** — import your own per-cell annotations from CSV, colour by them, and show
+  or hide individual groups.
 - **Inspection** — hover for a readout, click a cell to pin its full `obs` record.
 - **Navigation** — whole-slide minimap with click-to-jump, µm scale bar, and linkable views.
 
@@ -38,6 +40,28 @@ fit the whole slide. Set `XENIUM_DATA_ROOT` to expose a different directory. `np
 serves the production build with the same `/data` route.
 
 > The query parameter is `?zarr=`, not `?url=` — Vite reserves `?url` as a special import query.
+
+## Cell groups
+
+Drop one or more CSVs onto the **Cell groups** panel (or use the button). Each file is one
+annotation of the same cells — cell type, lineage, cluster, whatever you have:
+
+```csv
+cell_id,group,color
+aaaacgpa-1,B,#cb81da
+aaaagjhh-1,T,#0fd50b
+aaaahaac-1,Plasma,
+```
+
+- `cell_id` must match the table's index. Rows for cells not in the dataset are counted and
+  reported; if *nothing* matches, the import fails rather than adding an empty set.
+- `color` is optional — as a column, and per row. A group's colour is taken from the first row
+  that supplies one, so declaring it once is enough; groups with no colour fall back to the
+  built-in categorical palette. `#rgb`, `#rrggbb`, and `r,g,b` are accepted.
+- The header is optional too. Without one, columns are read positionally.
+
+Load several files and switch between them from **Colour by**; each keeps its own
+show/hide state, and every membership shows up in the cell inspector.
 
 ## Requirements
 

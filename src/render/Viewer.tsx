@@ -241,14 +241,15 @@ export function Viewer() {
    * cell covers.
    *
    * Below about half a pixel, 600k dots stop resolving and merge into a veil.
-   * When they are colour-mapped that veil is still the point of the view, so it
-   * keeps a floor of alpha; when they are a uniform colour it says nothing the
-   * image does not already show, and is dropped instead of dulling it.
+   * When they carry data — an obs column or a cell-group assignment — that veil
+   * is still the point of the view, so it keeps a floor of alpha; when they are
+   * a uniform colour it says nothing the image does not already show, and is
+   * dropped instead of dulling it.
    */
   const dotCoverage = useMemo(() => {
     const zoom = typeof viewState?.zoom === "number" ? viewState.zoom : 0;
     const screenRadius = CELL_RADIUS_PX * 2 ** zoom;
-    if (cellColoring.mode === "column") return Math.min(1, Math.max(0.22, screenRadius));
+    if (cellColoring.mode !== "uniform") return Math.min(1, Math.max(0.22, screenRadius));
     return screenRadius < 0.5 ? 0 : Math.min(1, screenRadius);
   }, [viewState?.zoom, cellColoring.mode]);
 
@@ -274,7 +275,7 @@ export function Viewer() {
           length: cells.n,
           attributes: {
             getPosition: { value: cells.positions, size: 2 },
-            getFillColor: { value: cells.colors, size: 3 },
+            getFillColor: { value: cells.colors, size: 4 },
           },
         },
         // Radius in world units so dots track the tissue as you zoom, with a

@@ -5,6 +5,7 @@ import { parquetRead } from "hyparquet";
 import { compressors } from "hyparquet-compressors";
 import type { ObsColumn, TableElement, XYTransform } from "../data/dataset";
 import { type DataSource, type SourceSpec, createDataSource } from "../data/stores";
+import { type ColumnLayout, forEachRow, parseColor, resolveLayout } from "./csv";
 import { UniformGrid } from "./grid";
 import { wkbReadRing, wkbVertexCount } from "./wkb";
 
@@ -24,7 +25,28 @@ export type ColumnData =
       p1: number;
       p99: number;
     }
-  | { kind: "categorical"; codes: Int32Array; categories: string[] };
+  | {
+      kind: "categorical";
+      /** Category index per cell; -1 where the cell has no value. */
+      codes: Int32Array;
+      categories: string[];
+      /** Cells per category, aligned with `categories`. */
+      counts: Uint32Array;
+      /** Explicit colour per category, where the source supplied one. */
+      colors?: ([number, number, number] | null)[];
+    };
+
+export interface GroupSetSummary {
+  name: string;
+  categories: string[];
+  counts: number[];
+  colors: ([number, number, number] | null)[];
+  /** Rows whose cell id matched a row in the table. */
+  matched: number;
+  /** Rows whose cell id was not found in the table. */
+  unmatched: number;
+  elapsedMs: number;
+}
 
 const PERCENTILE_BINS = 2048;
 
@@ -80,6 +102,8 @@ export interface CellsWorkerApi {
     toPixel: XYTransform,
   ): Promise<CellsInit>;
   column(name: string): Promise<ColumnData>;
+  importGroups(name: string, text: string): Promise<GroupSetSummary>;
+  removeGroups(name: string): Promise<void>;
   details(index: number): Promise<Record<string, string>>;
   loadBoundaries(
     name: string,
@@ -134,6 +158,8 @@ class CellStore implements CellsWorkerApi {
   #strings = new Map<string, Promise<string[]>>();
   #boundaries = new Map<string, Boundaries>();
   #pendingBoundaries = new Map<string, Promise<BoundarySummary>>();
+  /** Imported cell-group assignments, keyed by the name shown in the UI. */
+  #groups = new Map<string, ColumnData>();
   #n = 0;
 
   async init(spec: SourceSpec, table: TableElement, toPixel: XYTransform) {
@@ -171,6 +197,8 @@ class CellStore implements CellsWorkerApi {
   }
 
   column(name: string): Promise<ColumnData> {
+    const imported = this.#groups.get(name);
+    if (imported) return Promise.resolve(imported);
     let pending = this.#columns.get(name);
     if (!pending) {
       pending = this.#readColumn(this.#spec(name));
@@ -187,7 +215,7 @@ class CellStore implements CellsWorkerApi {
         this.#maybeStrings(`${spec.path}/categories`),
         this.#maybeCodes(spec.path),
       ]);
-      return { kind: "categorical", codes, categories };
+      return { kind: "categorical", codes, categories, counts: tally(codes, categories.length) };
     }
     if (spec.kind === "string") {
       const values = await this.#stringColumn(spec.path);
@@ -202,7 +230,7 @@ class CellStore implements CellsWorkerApi {
         }
         codes[i] = code;
       }
-      return { kind: "categorical", codes, categories };
+      return { kind: "categorical", codes, categories, counts: tally(codes, categories.length) };
     }
 
     const arr = await this.#open(spec.path);
@@ -257,6 +285,95 @@ class CellStore implements CellsWorkerApi {
       this.#strings.set(path, pending);
     }
     return pending;
+  }
+
+  /**
+   * Loads a cell-group assignment file: `cell_id, group[, color]`.
+   *
+   * The colour column is optional both per file and per row — the sample files
+   * declare each group's colour on a single row and leave it blank elsewhere —
+   * so the first non-empty value seen for a group wins, and groups without one
+   * fall back to the categorical palette at render time.
+   */
+  async importGroups(name: string, text: string): Promise<GroupSetSummary> {
+    const started = performance.now();
+    const tableIds = await this.#stringColumn(this.#table.indexColumn.path);
+    const rowOf = new Map<string, number>();
+    for (let i = 0; i < tableIds.length; i++) rowOf.set(tableIds[i], i);
+
+    const codes = new Int32Array(this.#n).fill(-1);
+    const categories: string[] = [];
+    const colors: ([number, number, number] | null)[] = [];
+    const codeOf = new Map<string, number>();
+    const counts: number[] = [];
+    let matched = 0;
+    let unmatched = 0;
+    let layout: ColumnLayout | undefined;
+
+    forEachRow(text, (row) => {
+      if (!layout) {
+        const resolved = resolveLayout(row);
+        layout = resolved.layout;
+        if (resolved.hasHeader) return;
+      }
+      const id = row[layout.id]?.trim();
+      const label = row[layout.group]?.trim();
+      if (!id || label === undefined || label === "") return;
+
+      let code = codeOf.get(label);
+      if (code === undefined) {
+        code = categories.push(label) - 1;
+        codeOf.set(label, code);
+        colors.push(null);
+        counts.push(0);
+      }
+      if (colors[code] === null && layout.color >= 0) {
+        colors[code] = parseColor(row[layout.color] ?? "") ?? null;
+      }
+
+      const cell = rowOf.get(id);
+      if (cell === undefined) {
+        unmatched++;
+        return;
+      }
+      codes[cell] = code;
+      counts[code]++;
+      matched++;
+    });
+
+    if (categories.length === 0) {
+      throw new Error("No group assignments found — expected columns cell_id, group[, color]");
+    }
+    if (matched === 0) {
+      // Parsing "succeeded" but nothing lined up, which in practice means the
+      // wrong columns were picked or the file belongs to another slide.
+      throw new Error(
+        `None of the ${unmatched.toLocaleString("en-US")} cell ids matched this dataset. ` +
+          "Expected columns cell_id, group[, color].",
+      );
+    }
+
+    this.#groups.set(name, {
+      kind: "categorical",
+      codes,
+      categories,
+      counts: Uint32Array.from(counts),
+      colors,
+    });
+
+    return {
+      name,
+      categories,
+      counts,
+      colors,
+      matched,
+      unmatched,
+      elapsedMs: Math.round(performance.now() - started),
+    };
+  }
+
+  async removeGroups(name: string) {
+    this.#groups.delete(name);
   }
 
   loadBoundaries(name: string, parquetPath: string, toPixel: XYTransform) {
@@ -411,6 +528,12 @@ class CellStore implements CellsWorkerApi {
     const out: Record<string, string> = {};
     const ids = await this.#stringColumn(this.#table.indexColumn.path);
     out[this.#table.indexColumn.name] = ids[index] ?? String(index);
+    // Imported group memberships first — they are what the user just chose to
+    // look at, so they belong above the generic obs columns.
+    for (const [name, groups] of this.#groups) {
+      if (groups.kind !== "categorical") continue;
+      out[name] = groups.categories[groups.codes[index]] ?? "—";
+    }
     for (const spec of this.#table.columns) {
       const column = await this.column(spec.name);
       out[spec.name] =
@@ -420,6 +543,14 @@ class CellStore implements CellsWorkerApi {
     }
     return out;
   }
+}
+
+function tally(codes: Int32Array, categoryCount: number): Uint32Array {
+  const counts = new Uint32Array(categoryCount);
+  for (let i = 0; i < codes.length; i++) {
+    if (codes[i] >= 0 && codes[i] < categoryCount) counts[codes[i]]++;
+  }
+  return counts;
 }
 
 function emptyShapes() {

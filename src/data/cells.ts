@@ -3,13 +3,14 @@ import type {
   BoundarySummary,
   CellsWorkerApi,
   ColumnData,
+  GroupSetSummary,
   ViewportShapes,
 } from "../workers/cells.worker";
 import CellsWorker from "../workers/cells.worker?worker";
 import type { Dataset } from "./dataset";
 import type { SourceSpec } from "./stores";
 
-export type { BoundarySummary, ColumnData, ViewportShapes };
+export type { BoundarySummary, ColumnData, GroupSetSummary, ViewportShapes };
 
 /** Main-thread handle to the cells worker. */
 export class CellsClient {
@@ -35,6 +36,14 @@ export class CellsClient {
 
   column(name: string): Promise<ColumnData> {
     return this.#api.column(name);
+  }
+
+  importGroups(name: string, text: string): Promise<GroupSetSummary> {
+    return this.#api.importGroups(name, text);
+  }
+
+  removeGroups(name: string): Promise<void> {
+    return this.#api.removeGroups(name);
   }
 
   loadBoundaries(dataset: Dataset, name: string): Promise<BoundarySummary> {

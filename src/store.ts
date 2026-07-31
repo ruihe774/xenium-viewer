@@ -29,13 +29,29 @@ const DEFAULT_CHANNEL_COLORS: [number, number, number][] = [
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
-/** How the cells layer is coloured. `column` names an obs column. */
+/**
+ * How the cells layer is coloured. `column` names an obs column; `group` names
+ * an imported cell-group set. They are separate modes because the two
+ * namespaces can collide — a file may well be called `segmentation_method`.
+ */
 export interface CellColoring {
-  mode: "uniform" | "column";
+  mode: "uniform" | "column" | "group";
   column?: string;
   colormap: string;
   /** Value window for numeric columns; ignored for categorical ones. */
   range?: [number, number];
+}
+
+/** An imported cell-group assignment file. */
+export interface GroupSet {
+  name: string;
+  categories: string[];
+  counts: number[];
+  colors: ([number, number, number] | null)[];
+  matched: number;
+  unmatched: number;
+  /** Categories the user has hidden; hidden cells are not drawn. */
+  hidden: string[];
 }
 
 export interface CellsState {
@@ -67,6 +83,10 @@ export interface AppState {
   cellOpacity: number;
   cellColoring: CellColoring;
   uniformCellColor: [number, number, number];
+  /** Imported cell-group files, in the order they were added. */
+  groupSets: GroupSet[];
+  groupImportError?: string;
+  groupImporting: boolean;
   selectedCell?: number;
   cellDetails?: Record<string, string>;
   /** Mirrored from the viewer so the panel can report boundary progress. */
@@ -85,6 +105,10 @@ export interface AppState {
   setBoundaryStatus(value: BoundaryStatus): void;
   setCellOpacity(value: number): void;
   setCellColoring(patch: Partial<CellColoring>): Promise<void>;
+  importGroupFiles(files: File[]): Promise<void>;
+  removeGroupSet(name: string): Promise<void>;
+  toggleGroupCategory(name: string, category: string): Promise<void>;
+  setGroupCategoriesHidden(name: string, hidden: string[]): Promise<void>;
   selectCell(index?: number): Promise<void>;
   reset(): void;
 }
@@ -107,32 +131,51 @@ const IDLE_BOUNDARIES: BoundaryStatus = {
   count: 0,
 };
 
+/** Colour for a category: the source's own, else the fallback palette. */
+function colorForCategory(column: ColumnData, code: number): [number, number, number] {
+  if (column.kind !== "categorical" || code < 0) return categoryColor(-1);
+  return column.colors?.[code] ?? categoryColor(code);
+}
+
 /**
- * Builds the per-cell RGB buffer for the current colouring. Runs over ~600k
+ * Builds the per-cell RGBA buffer for the current colouring. Runs over ~600k
  * cells, which is a few milliseconds — cheap enough to stay on the main thread
  * and avoid another round trip.
+ *
+ * Alpha carries visibility: cells in a hidden group, or with no value at all
+ * for a categorical colouring, are made fully transparent rather than removed,
+ * so the geometry buffers and picking indices stay untouched.
  */
 function buildColors(
   coloring: CellColoring,
   column: ColumnData | undefined,
   n: number,
   uniform: [number, number, number],
+  hidden?: ReadonlySet<string>,
 ): Uint8Array {
-  const colors = new Uint8Array(n * 3);
+  const colors = new Uint8Array(n * 4);
   if (coloring.mode === "uniform" || !column) {
     for (let i = 0; i < n; i++) {
-      colors[i * 3] = uniform[0];
-      colors[i * 3 + 1] = uniform[1];
-      colors[i * 3 + 2] = uniform[2];
+      colors[i * 4] = uniform[0];
+      colors[i * 4 + 1] = uniform[1];
+      colors[i * 4 + 2] = uniform[2];
+      colors[i * 4 + 3] = 255;
     }
     return colors;
   }
   if (column.kind === "categorical") {
+    // Resolve each category once, not once per cell.
+    const lut = column.categories.map((label, code) => {
+      const [r, g, b] = colorForCategory(column, code);
+      return [r, g, b, hidden?.has(label) ? 0 : 255];
+    });
+    const missing = [110, 110, 110, coloring.mode === "group" ? 0 : 255];
     for (let i = 0; i < n; i++) {
-      const [r, g, b] = categoryColor(column.codes[i]);
-      colors[i * 3] = r;
-      colors[i * 3 + 1] = g;
-      colors[i * 3 + 2] = b;
+      const entry = lut[column.codes[i]] ?? missing;
+      colors[i * 4] = entry[0];
+      colors[i * 4 + 1] = entry[1];
+      colors[i * 4 + 2] = entry[2];
+      colors[i * 4 + 3] = entry[3];
     }
     return colors;
   }
@@ -149,11 +192,19 @@ function buildColors(
   for (let i = 0; i < n; i++) {
     const t = (column.values[i] - lo) / span;
     const bin = (t <= 0 ? 0 : t >= 1 ? 255 : (t * 255) | 0) * 3;
-    colors[i * 3] = lut[bin];
-    colors[i * 3 + 1] = lut[bin + 1];
-    colors[i * 3 + 2] = lut[bin + 2];
+    colors[i * 4] = lut[bin];
+    colors[i * 4 + 1] = lut[bin + 1];
+    colors[i * 4 + 2] = lut[bin + 2];
+    colors[i * 4 + 3] = 255;
   }
   return colors;
+}
+
+/** Hidden category labels for whichever group set the colouring points at. */
+function hiddenFor(state: AppState, coloring: CellColoring): Set<string> | undefined {
+  if (coloring.mode !== "group") return undefined;
+  const set = state.groupSets.find((g) => g.name === coloring.column);
+  return set ? new Set(set.hidden) : undefined;
 }
 
 /** Persists the current display preferences for the open dataset. */
@@ -190,6 +241,8 @@ export const useApp = create<AppState>((set, get) => ({
   cellOpacity: 0.7,
   cellColoring: { mode: "uniform", colormap: "viridis" },
   uniformCellColor: [255, 255, 255],
+  groupSets: [],
+  groupImporting: false,
 
   async open(spec) {
     // React StrictMode double-invokes effects in development, and the auto-open
@@ -205,6 +258,8 @@ export const useApp = create<AppState>((set, get) => ({
       cellsClient: undefined,
       selectedCell: undefined,
       cellDetails: undefined,
+      groupSets: [],
+      groupImportError: undefined,
     });
     try {
       const source = createDataSource(spec);
@@ -234,7 +289,12 @@ export const useApp = create<AppState>((set, get) => ({
         boundaryStyle: saved.boundaryStyle ?? "outline",
         cellOpacity: saved.cellOpacity ?? 0.7,
         imageOpacity: saved.imageOpacity ?? 1,
-        cellColoring: saved.cellColoring ?? { mode: "uniform", colormap: "viridis" },
+        // Group sets come from files the user picks each session, so a saved
+        // colouring that points at one has nothing to resolve against.
+        cellColoring:
+          saved.cellColoring && saved.cellColoring.mode !== "group"
+            ? saved.cellColoring
+            : { mode: "uniform", colormap: "viridis" },
       });
 
       if (!dataset.table) return;
@@ -337,10 +397,14 @@ export const useApp = create<AppState>((set, get) => ({
     }
 
     let columnData = cells.columnData;
-    if (coloring.mode === "column" && coloring.column) {
-      // Only refetch when the column actually changed; colormap and range
-      // changes reuse the values already in memory.
-      if (coloring.column !== state.cellColoring.column || !columnData) {
+    if (coloring.mode !== "uniform" && coloring.column) {
+      // Only refetch when the source actually changed; colormap, range and
+      // visibility changes reuse the values already in memory.
+      const changed =
+        coloring.column !== state.cellColoring.column ||
+        coloring.mode !== state.cellColoring.mode ||
+        !columnData;
+      if (changed) {
         columnData = await cellsClient?.column(coloring.column);
         if (columnData?.kind === "numeric" && !patch.range) {
           coloring.range = [columnData.p1, columnData.p99];
@@ -355,10 +419,94 @@ export const useApp = create<AppState>((set, get) => ({
       cells: {
         ...get().cells,
         columnData,
-        colors: buildColors(coloring, columnData, cells.n, state.uniformCellColor),
+        colors: buildColors(
+          coloring,
+          columnData,
+          cells.n,
+          state.uniformCellColor,
+          hiddenFor(get(), coloring),
+        ),
       },
     });
     persist(get());
+  },
+
+  async importGroupFiles(files) {
+    const { cellsClient } = get();
+    if (!cellsClient || files.length === 0) return;
+    set({ groupImporting: true, groupImportError: undefined });
+    try {
+      let lastName: string | undefined;
+      for (const file of files) {
+        const name = file.name.replace(/\.(csv|tsv|txt)$/i, "");
+        const summary = await cellsClient.importGroups(name, await file.text());
+        console.info(
+          `[groups] ${name}: ${summary.categories.length} groups, ` +
+            `${summary.matched.toLocaleString("en-US")} cells matched` +
+            (summary.unmatched ? `, ${summary.unmatched} unmatched` : "") +
+            ` in ${summary.elapsedMs} ms`,
+        );
+        set((s) => ({
+          // Re-importing the same name replaces the previous entry in place.
+          groupSets: [
+            ...s.groupSets.filter((g) => g.name !== name),
+            { ...summary, hidden: [] },
+          ],
+        }));
+        lastName = name;
+      }
+      set({ groupImporting: false });
+      // Show what was just imported; that is the reason for importing it.
+      if (lastName) await get().setCellColoring({ mode: "group", column: lastName });
+    } catch (err) {
+      set({
+        groupImporting: false,
+        groupImportError: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  async removeGroupSet(name) {
+    await get().cellsClient?.removeGroups(name);
+    set((s) => ({ groupSets: s.groupSets.filter((g) => g.name !== name) }));
+    const { cellColoring } = get();
+    if (cellColoring.mode === "group" && cellColoring.column === name) {
+      await get().setCellColoring({ mode: "uniform", column: undefined });
+    }
+  },
+
+  async toggleGroupCategory(name, category) {
+    const set0 = get().groupSets.find((g) => g.name === name);
+    if (!set0) return;
+    const hidden = set0.hidden.includes(category)
+      ? set0.hidden.filter((c) => c !== category)
+      : [...set0.hidden, category];
+    await get().setGroupCategoriesHidden(name, hidden);
+  },
+
+  async setGroupCategoriesHidden(name, hidden) {
+    set((s) => ({
+      groupSets: s.groupSets.map((g) => (g.name === name ? { ...g, hidden } : g)),
+    }));
+    const state = get();
+    if (state.cellColoring.mode === "group" && state.cellColoring.column === name) {
+      // Recolour in place; visibility lives in the alpha channel.
+      const { cells } = state;
+      if (cells.status === "ready") {
+        set({
+          cells: {
+            ...cells,
+            colors: buildColors(
+              state.cellColoring,
+              cells.columnData,
+              cells.n,
+              state.uniformCellColor,
+              new Set(hidden),
+            ),
+          },
+        });
+      }
+    }
   },
 
   async selectCell(index) {
@@ -384,6 +532,8 @@ export const useApp = create<AppState>((set, get) => ({
       cellsClient: undefined,
       selectedCell: undefined,
       cellDetails: undefined,
+      groupSets: [],
+      groupImportError: undefined,
     });
   },
 }));
