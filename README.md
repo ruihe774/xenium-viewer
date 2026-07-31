@@ -38,20 +38,7 @@ npm install && npm run dev
 ```
 
 Then open <http://localhost:5173> and either click **Open folder…** to pick a `.zarr` directory,
-or paste an HTTP URL.
-
-The dev server also exposes the repo directory at `/data` with byte-range support, so a store
-sitting next to the source can be opened directly — and linked to:
-
-```
-http://localhost:5173/?zarr=/data/slide01.zarr&x=25000&y=52000&zoom=-1
-```
-
-`zarr` is the store URL; `x`, `y` (level-0 image pixels) and `zoom` pin the view. Omit them to
-fit the whole slide. Set `XENIUM_DATA_ROOT` to expose a different directory. `npm run preview`
-serves the production build with the same `/data` route.
-
-> The query parameter is `?zarr=`, not `?url=` — Vite reserves `?url` as a special import query.
+or paste an HTTP URL. See `CLAUDE.md` for dev server details and how to link to saved views.
 
 ## Cell groups
 
@@ -82,52 +69,4 @@ show/hide state, and every membership shows up in the cell inspector.
 - A SpatialData zarr store written by `spatialdata-io`'s Xenium reader, **with consolidated
   metadata** (`sdata.write(path)` in spatialdata ≥ 0.2 does this). The whole node tree is
   discovered from the root `zarr.json`; without it there is no way to list children.
-- Zarr v3 with `zstd` / `sharding_indexed` / `crc32c` / `vlen-utf8` codecs is what the reference
-  dataset uses and what is exercised; zarrita handles the rest of the v3 codec set too.
-
-## How it works
-
-```
-src/
-  data/      store backends (directory handle / HTTP), dataset model, settings
-  workers/   image tile decoding, cell table + boundary geometry, WKB, spatial grid
-  render/    Viv pixel source, deck.gl layers, the viewer component
-  ui/        panels, colormaps, minimap, scale bar
-```
-
-Three things carry most of the weight:
-
-**Image tiles.** Chunks are 4096×4096 uint16 (33.5 MB decoded) and zstd-compressed, so decoding
-dominates. A pool of three workers decodes them and caches the _decoded_ chunks; tiles are cut
-from that cache and transferred back as zero-copy buffers. Requests are routed to a worker by
-chunk coordinate, so a chunk is only ever decoded and held once. Rendering uses Viv's
-`MultiscaleImageLayer` with a hand-rolled `PixelSource` — Viv's own zarr loader rejects
-SpatialData's `0.5-dev-spatialdata` multiscales version and pins an older zarrita.
-
-**Cell geometry.** `shapes.parquet` is one 103 MB row group of WKB polygons. hyparquet reads it
-with `geoparquet: false` and `utf8: false` (its default would text-decode the WKB and corrupt
-every byte ≥ 0x80), and the rings go straight into flat `Float32Array`s — 606,931 polygons and
-15.2M vertices in about 1.4 s. That geometry stays in the worker; only the polygons intersecting
-the viewport cross to the main thread, selected via a uniform grid over bounding boxes. Above
-40,000 polygons in view the layer falls back to centroid dots.
-
-**Gene expression.** `X` is CSR over cells, so a gene's column is scattered across all 154M
-non-zeros. Rather than build a transpose, the matrix is read once into a worker in a compact
-form — gene ids as `uint16`, counts as bytes with a side map for the 0.007% above 255 — which
-is 445 MB and takes about 4 s. Because each CSR row's gene ids ascend, a per-row binary search
-then pulls a whole column out in 15–18 ms, so switching genes is interactive. The inspector's
-per-cell gene list does not wait on any of that: a CSR row is contiguous, and the sharding
-codec turns it into a single ~600 KB fetch, about 6 ms.
-
-**Transcripts.** 402.7M points across 69 parquet parts and 7.1 GB, so none of it is loaded.
-Every row group's x/y statistics are read from the footers once (417 of them, ~2.8 s), and a
-viewport query decodes only the row groups it overlaps — a 1000×1000 µm view touches 8. Only
-`x`, `y` and `feature_name` are projected, 5.2 compressed bytes per row against ~18 for the
-full schema. Decoded row groups are cached in the worker, capped at 256 MB. Above 1.5M points
-in view nothing is drawn: the estimate comes from the footers, so an over-full viewport costs
-no decoding at all.
-
-**Coordinates.** Everything renders in level-0 image pixels. Shapes, centroids and transcripts
-are stored in micrometres, so the scale factor from the element's `coordinateTransformations`
-is what converts them — and its reciprocal is the pixel size (0.2125 µm for the reference
-slide) that drives the scale bar.
+- Zarr v3 is required; zarrita handles the v3 codec set.
