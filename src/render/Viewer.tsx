@@ -2,7 +2,7 @@ import { type Layer, OrthographicView, type OrthographicViewState } from "@deck.
 import { ScatterplotLayer } from "@deck.gl/layers";
 import DeckGL from "@deck.gl/react";
 import { ColorPaletteExtension, MultiscaleImageLayer } from "@hms-dbmi/viv";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store";
 import { Minimap } from "../ui/Minimap";
 import { ScaleBar } from "../ui/ScaleBar";
@@ -84,10 +84,7 @@ export function Viewer() {
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [viewState, setViewState] = useState<OrthographicViewState>();
 
-  const primary = useMemo(
-    () => dataset?.images.find((i) => i.name === "morphology_focus") ?? dataset?.images[0],
-    [dataset],
-  );
+  const primary = dataset?.images.find((i) => i.name === "morphology_focus") ?? dataset?.images[0];
 
   // Created inside the effect rather than in a memo so that construction and
   // `destroy()` are always paired: a memo survives StrictMode's remount, so its
@@ -124,13 +121,13 @@ export function Viewer() {
     return () => observer.disconnect();
   }, []);
 
-  const fit = useCallback(() => {
+  const fit = () => {
     if (!primary || size.width === 0) return;
     setViewState({
       target: [primary.width / 2, primary.height / 2, 0],
       zoom: fitZoom(primary.width, primary.height, size.width, size.height),
     });
-  }, [primary, size.width, size.height]);
+  };
 
   // Fit once, as soon as we know both the image and the viewport size — unless
   // the URL pins a view (`?x=&y=&zoom=` in level-0 pixels), which makes a
@@ -192,24 +189,21 @@ export function Viewer() {
   // Viv refetches every raster and drops its tile cache whenever the identity of
   // `selections` changes, so this must not be rebuilt when contrast or colour
   // changes — only when the channel count does.
-  const selections = useMemo(
-    () => Array.from({ length: channels.length }, (_, c) => ({ c })),
-    [channels.length],
-  );
+  const selections = Array.from({ length: channels.length }, (_, c) => ({ c }));
 
   /** World-space bounds of what the viewport currently shows. */
-  const viewBounds = useMemo(() => {
+  const viewBounds = (() => {
     if (!viewState || typeof viewState.zoom !== "number" || size.width === 0) return undefined;
     const scale = 2 ** viewState.zoom;
     const halfW = size.width / 2 / scale;
     const halfH = size.height / 2 / scale;
     const [cx, cy] = viewState.target as number[];
     return [cx - halfW, cy - halfH, cx + halfW, cy + halfH] as const;
-  }, [viewState, size.width, size.height]);
+  })();
 
-  const panTo = useCallback((x: number, y: number) => {
+  const panTo = (x: number, y: number) => {
     setViewState((prev) => (prev ? { ...prev, target: [x, y, 0] } : prev));
-  }, []);
+  };
 
   const cellBoundaries = useBoundaries(
     "cell_boundaries",
@@ -224,11 +218,11 @@ export function Viewer() {
 
   const transcripts = useTranscripts(showTranscripts, viewBounds);
 
-  const transcriptLayers = useMemo(() => {
+  // Colours are resolved here rather than in the worker so that changing the
+  // highlighted genes recolours what is already on screen instead of
+  // re-running the viewport query.
+  const transcriptLayers = (() => {
     if (!transcripts.points) return [];
-    // Colours are resolved here rather than in the worker so that changing the
-    // highlighted genes recolours what is already on screen instead of
-    // re-running the viewport query.
     const highlighted = transcriptGenes.map((name) => genes.indexOf(name));
     const lut = buildTranscriptLut(genes.length, highlighted, hideOtherTranscripts);
     const colors = expandTranscriptColors(transcripts.points.codes, lut, genes.length);
@@ -238,14 +232,7 @@ export function Viewer() {
       pointSize: transcriptPointSize,
       opacity: transcriptOpacity,
     });
-  }, [
-    transcripts.points,
-    genes,
-    transcriptGenes,
-    hideOtherTranscripts,
-    transcriptPointSize,
-    transcriptOpacity,
-  ]);
+  })();
 
   const setTranscriptStatus = useApp((s) => s.setTranscriptStatus);
   useEffect(() => {
@@ -258,7 +245,7 @@ export function Viewer() {
     });
   }, [setTranscriptStatus, transcripts]);
 
-  const boundaryLayers = useMemo(() => {
+  const boundaryLayers = (() => {
     if (!showCells) return [];
     const layers = [];
     if (cellBoundaries.shapes) {
@@ -289,15 +276,7 @@ export function Viewer() {
       );
     }
     return layers;
-  }, [
-    showCells,
-    cellBoundaries.shapes,
-    nucleusBoundaries.shapes,
-    cells.colors,
-    boundaryStyle,
-    cellOpacity,
-    selectCell,
-  ]);
+  })();
 
   // Dots stand in whenever polygons are not being drawn — either because
   // boundaries are off, still loading, or there are too many in view.
@@ -316,12 +295,12 @@ export function Viewer() {
    * a uniform colour it says nothing the image does not already show, and is
    * dropped instead of dulling it.
    */
-  const dotCoverage = useMemo(() => {
+  const dotCoverage = (() => {
     const zoom = typeof viewState?.zoom === "number" ? viewState.zoom : 0;
     const screenRadius = CELL_RADIUS_PX * 2 ** zoom;
     if (cellColoring.mode !== "uniform") return Math.min(1, Math.max(0.22, screenRadius));
     return screenRadius < 0.5 ? 0 : Math.min(1, screenRadius);
-  }, [viewState?.zoom, cellColoring.mode]);
+  })();
 
   const dotsVisible = showDots && dotCoverage > 0 && cells.status === "ready";
   const setBoundaryStatus = useApp((s) => s.setBoundaryStatus);
@@ -335,7 +314,7 @@ export function Viewer() {
     });
   }, [setBoundaryStatus, cellBoundaries, nucleusBoundaries, dotsVisible]);
 
-  const cellLayers = useMemo(() => {
+  const cellLayers = (() => {
     if (!showDots || dotCoverage === 0) return [];
     if (cells.status !== "ready" || !cells.positions || !cells.colors) return [];
     return [
@@ -367,9 +346,9 @@ export function Viewer() {
         updateTriggers: { getFillColor: cells.colors },
       }),
     ];
-  }, [showDots, cells, cellOpacity, dotCoverage, selectCell]);
+  })();
 
-  const selectionLayer = useMemo(() => {
+  const selectionLayer = (() => {
     if (selectedCell === undefined || !cells.positions) return [];
     return [
       new ScatterplotLayer({
@@ -387,9 +366,9 @@ export function Viewer() {
         pickable: false,
       }),
     ];
-  }, [cells.positions, selectedCell]);
+  })();
 
-  const layers = useMemo(() => {
+  const layers = (() => {
     if (!pyramid || channels.length === 0) return [];
     return [
       createImageLayer({
@@ -418,55 +397,37 @@ export function Viewer() {
       ...cellLayers,
       ...selectionLayer,
     ];
-  }, [
-    pyramid,
-    channels,
-    selections,
-    imageOpacity,
-    transcriptLayers,
-    boundaryLayers,
-    cellLayers,
-    selectionLayer,
-  ]);
+  })();
 
   /**
    * Hover readout. Boundary layers index by polygon, so they carry their own
    * polygon-to-cell mapping; the centroid layer indexes by cell directly.
    */
-  const getTooltip = useCallback(
-    (info: { index: number; layer?: { id: string } | null }) => {
-      if (!info.layer || info.index < 0) return null;
-      const id = info.layer.id;
-      let cell = info.index;
-      if (id.startsWith("cell-boundaries")) {
-        cell = cellBoundaries.shapes?.cellIndices[info.index] ?? -1;
-      } else if (id.startsWith("nucleus-boundaries")) {
-        cell = nucleusBoundaries.shapes?.cellIndices[info.index] ?? -1;
-      } else if (id !== "cell-centroids") {
-        return null;
-      }
-      if (cell < 0) return null;
+  const getTooltip = (info: { index: number; layer?: { id: string } | null }) => {
+    if (!info.layer || info.index < 0) return null;
+    const id = info.layer.id;
+    let cell = info.index;
+    if (id.startsWith("cell-boundaries")) {
+      cell = cellBoundaries.shapes?.cellIndices[info.index] ?? -1;
+    } else if (id.startsWith("nucleus-boundaries")) {
+      cell = nucleusBoundaries.shapes?.cellIndices[info.index] ?? -1;
+    } else if (id !== "cell-centroids") {
+      return null;
+    }
+    if (cell < 0) return null;
 
-      const cellId = cells.ids?.[cell];
-      const lines = [cellId ? `Cell ${cellId}` : `Cell #${cell.toLocaleString("en-US")}`];
-      const column = cells.columnData;
-      if (column && cellColoring.column) {
-        const value =
-          column.kind === "numeric"
-            ? formatValue(column.values[cell])
-            : (column.categories[column.codes[cell]] ?? "—");
-        lines.push(`${cellColoring.column}: ${value}`);
-      }
-      return { text: lines.join("\n"), style: TOOLTIP_STYLE };
-    },
-    [
-      cellBoundaries.shapes,
-      nucleusBoundaries.shapes,
-      cells.ids,
-      cells.columnData,
-      cellColoring.column,
-    ],
-  );
+    const cellId = cells.ids?.[cell];
+    const lines = [cellId ? `Cell ${cellId}` : `Cell #${cell.toLocaleString("en-US")}`];
+    const column = cells.columnData;
+    if (column && cellColoring.column) {
+      const value =
+        column.kind === "numeric"
+          ? formatValue(column.values[cell])
+          : (column.categories[column.codes[cell]] ?? "—");
+      lines.push(`${cellColoring.column}: ${value}`);
+    }
+    return { text: lines.join("\n"), style: TOOLTIP_STYLE };
+  };
 
   return (
     <div ref={containerRef} className="stage-inner">

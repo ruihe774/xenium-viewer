@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 /**
  * Rows rendered at once. A 5,101-gene panel is far past what a `<select>` or a
@@ -34,7 +34,7 @@ function search(genes: string[], query: string): { rows: string[]; total: number
 
 export function GeneList({ genes, selected, onPick, colorOf, placeholder }: GeneListProps) {
   const [query, setQuery] = useState("");
-  const { rows, total } = useMemo(() => search(genes, query), [genes, query]);
+  const { rows, total } = search(genes, query);
 
   return (
     <>

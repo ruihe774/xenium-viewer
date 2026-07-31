@@ -33,8 +33,8 @@ export function useBoundaries(
   const client = useApp((s) => s.cellsClient);
   const dataset = useApp((s) => s.dataset);
   const [result, setResult] = useState<BoundaryResult>(EMPTY);
-  const loaded = useRef<Promise<unknown>>();
-  const loadedFor = useRef<unknown>();
+  const loaded = useRef<Promise<unknown> | undefined>(undefined);
+  const loadedFor = useRef<unknown>(undefined);
   const requestId = useRef(0);
 
   useEffect(() => {

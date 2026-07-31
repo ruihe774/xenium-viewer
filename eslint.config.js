@@ -16,7 +16,7 @@ export default tseslint.config(
   tseslint.configs.recommendedTypeChecked,
   react.configs.flat.recommended,
   react.configs.flat["jsx-runtime"],
-  reactHooks.configs.flat.recommended,
+  reactHooks.configs.flat["recommended-latest"],
 
   {
     files: ["**/*.{ts,tsx}"],
@@ -45,6 +45,12 @@ export default tseslint.config(
         "error",
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
+      // React Compiler gives closures over props/state the same stable
+      // identity useCallback/useMemo used to provide by hand, which is what
+      // lets this codebase drop those calls. `exhaustive-deps` predates the
+      // compiler and still tells you to reintroduce them, which the React
+      // team's own compiler docs say to disable rather than follow.
+      "react-hooks/exhaustive-deps": "off",
     },
   },
 

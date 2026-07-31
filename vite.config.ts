@@ -86,7 +86,10 @@ function serveData(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), serveData()],
+  plugins: [
+    react({ babel: { plugins: [["babel-plugin-react-compiler", { target: "19" }]] } }),
+    serveData(),
+  ],
   server: { port: 5173, strictPort: true },
   worker: { format: "es" },
   build: { target: "es2022" },

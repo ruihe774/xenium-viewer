@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useRef } from "react";
 
 interface Props {
   min: number;
@@ -39,28 +39,23 @@ export function RangeSlider({ min, max, value, onChange, histogram, color, step 
   const span = Math.max(1, max - min);
   const pct = (v: number) => ((v - min) / span) * 100;
 
-  const startDrag = useCallback(
-    (which: "lo" | "hi") => (event: React.PointerEvent) => {
-      event.preventDefault();
-      const track = trackRef.current;
-      if (!track) return;
-      const move = (e: PointerEvent) => {
-        const rect = track.getBoundingClientRect();
-        const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
-        const next = roundTo(min + ratio * span, step);
-        onChange(
-          which === "lo" ? [Math.min(next, hi - step), hi] : [lo, Math.max(next, lo + step)],
-        );
-      };
-      const up = () => {
-        window.removeEventListener("pointermove", move);
-        window.removeEventListener("pointerup", up);
-      };
-      window.addEventListener("pointermove", move);
-      window.addEventListener("pointerup", up);
-    },
-    [min, span, lo, hi, step, onChange],
-  );
+  const startDrag = (which: "lo" | "hi") => (event: React.PointerEvent) => {
+    event.preventDefault();
+    const track = trackRef.current;
+    if (!track) return;
+    const move = (e: PointerEvent) => {
+      const rect = track.getBoundingClientRect();
+      const ratio = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+      const next = roundTo(min + ratio * span, step);
+      onChange(which === "lo" ? [Math.min(next, hi - step), hi] : [lo, Math.max(next, lo + step)]);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   const peak = histogram?.length ? Math.log1p(Math.max(...histogram)) : 1;
   const rgb = color ? `rgb(${color.join(",")})` : "var(--accent)";
