@@ -387,7 +387,8 @@ export function Viewer() {
       }
       if (cell < 0) return null;
 
-      const lines = [`Cell #${cell.toLocaleString("en-US")}`];
+      const cellId = cells.ids?.[cell];
+      const lines = [cellId ? `Cell ${cellId}` : `Cell #${cell.toLocaleString("en-US")}`];
       const column = cells.columnData;
       if (column && cellColoring.column) {
         const value =
@@ -398,7 +399,7 @@ export function Viewer() {
       }
       return { text: lines.join("\n"), style: TOOLTIP_STYLE };
     },
-    [cellBoundaries.shapes, nucleusBoundaries.shapes, cells.columnData, cellColoring.column],
+    [cellBoundaries.shapes, nucleusBoundaries.shapes, cells.ids, cells.columnData, cellColoring.column],
   );
 
   return (

@@ -62,6 +62,8 @@ export interface CellsState {
   /** Per-cell RGB, derived from `coloring`. */
   colors?: Uint8Array;
   columnData?: ColumnData;
+  /** Table index (cell id) strings, loaded lazily after centroids are ready. */
+  ids?: string[];
 }
 
 export interface AppState {
@@ -318,6 +320,12 @@ export const useApp = create<AppState>((set, get) => ({
         // A restored colour column can only be fetched once the worker has the
         // table open, which is now.
         if (get().cellColoring.mode === "column") await get().setCellColoring({});
+        // Cell ids are only needed for the hover tooltip, so fetch them in the
+        // background rather than delaying the "ready" state.
+        void cellsClient.ids().then((ids) => {
+          const current = get().cells;
+          if (current.status === "ready") set({ cells: { ...current, ids } });
+        });
       } catch (err) {
         set({
           cells: {

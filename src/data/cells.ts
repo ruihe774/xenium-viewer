@@ -34,6 +34,10 @@ export class CellsClient {
     return this.#api.init(spec, dataset.table, shapes.toPixel);
   }
 
+  ids(): Promise<string[]> {
+    return this.#api.ids();
+  }
+
   column(name: string): Promise<ColumnData> {
     return this.#api.column(name);
   }

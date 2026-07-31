@@ -102,6 +102,7 @@ export type ViewportShapes =
  */
 export interface CellsWorkerApi {
   init: (spec: SourceSpec, table: TableElement, toPixel: XYTransform) => Promise<CellsInit>;
+  ids: () => Promise<string[]>;
   column: (name: string) => Promise<ColumnData>;
   importGroups: (name: string, text: string) => Promise<GroupSetSummary>;
   removeGroups: (name: string) => void;
@@ -182,6 +183,10 @@ class CellStore implements CellsWorkerApi {
       positions[i * 2 + 1] = source[i * 2 + 1] * toPixel.sy + toPixel.ty;
     }
     return Comlink.transfer({ n, positions }, [positions.buffer]);
+  }
+
+  ids(): Promise<string[]> {
+    return this.#stringColumn(this.#table.indexColumn.path);
   }
 
   #open(path: string) {
