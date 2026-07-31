@@ -1,4 +1,4 @@
-import { OrthographicView, type OrthographicViewState } from "@deck.gl/core";
+import { type Layer, OrthographicView, type OrthographicViewState } from "@deck.gl/core";
 import { ScatterplotLayer } from "@deck.gl/layers";
 import DeckGL from "@deck.gl/react";
 import { ColorPaletteExtension, MultiscaleImageLayer } from "@hms-dbmi/viv";
@@ -39,6 +39,17 @@ function fitZoom(width: number, height: number, w: number, h: number): number {
   return Math.log2(Math.min(w / width, h / height));
 }
 
+/**
+ * Viv reads `excludeBackground` and `maxCacheSize` at runtime but declares
+ * neither on its layer props, so they can only be passed through an untyped
+ * cast. Isolated here, with an explicit return type, so the `any` cannot leak
+ * into the layer array.
+ */
+function createImageLayer(props: Record<string, unknown>): Layer {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-argument
+  return new MultiscaleImageLayer(props as any) as Layer;
+}
+
 export function Viewer() {
   const source = useApp((s) => s.source);
   const dataset = useApp((s) => s.dataset);
@@ -69,7 +80,12 @@ export function Viewer() {
   // Created inside the effect rather than in a memo so that construction and
   // `destroy()` are always paired: a memo survives StrictMode's remount, so its
   // workers would be terminated by the first cleanup and never replaced.
+  //
+  // A worker pool is exactly the "external system" an effect is for, and its
+  // handle has to reach render somehow — so setState here is the intended
+  // shape, not the cascading-render pattern the rule targets.
   const [pyramid, setPyramid] = useState<ImagePyramid>();
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!source || !primary) {
       setPyramid(undefined);
@@ -82,6 +98,7 @@ export function Viewer() {
       setPyramid(undefined);
     };
   }, [source, primary]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Track the container size so the initial fit is correct.
   useEffect(() => {
@@ -106,7 +123,11 @@ export function Viewer() {
   // Fit once, as soon as we know both the image and the viewport size — unless
   // the URL pins a view (`?x=&y=&zoom=` in level-0 pixels), which makes a
   // particular field of view linkable and keeps tests deterministic.
+  //
+  // The initial view depends on a measurement that only exists after layout, so
+  // it cannot be a lazy initial state; it runs exactly once, guarded by a ref.
   const fitted = useRef(false);
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (fitted.current || !primary || size.width === 0) return;
     fitted.current = true;
@@ -120,6 +141,7 @@ export function Viewer() {
       fit();
     }
   }, [fit, primary, size.width]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     fitted.current = false;
@@ -322,7 +344,7 @@ export function Viewer() {
   const layers = useMemo(() => {
     if (!pyramid || channels.length === 0) return [];
     return [
-      new MultiscaleImageLayer({
+      createImageLayer({
         id: "morphology",
         loader: pyramid.levels,
         selections,
@@ -340,9 +362,7 @@ export function Viewer() {
         // 1024x1024x uint16 per channel (8 MB for four channels), so the default
         // runs to gigabytes on a whole-slide view. Cap it instead.
         maxCacheSize: TILE_CACHE_SIZE,
-        // Viv's layer props are typed loosely enough that the extra props above
-        // (excludeBackground, maxCacheSize) are not in its declaration.
-      } as unknown as ConstructorParameters<typeof MultiscaleImageLayer>[0]),
+      }),
       ...boundaryLayers,
       ...cellLayers,
       ...selectionLayer,
@@ -386,19 +406,17 @@ export function Viewer() {
       {viewState && (
         <DeckGL
           // Exposed for debugging from the console: layer list, tile cache
-          // contents, viewport state. Dev only.
+          // occupancy, viewport state. Dev builds only.
           ref={(r) => {
             if (import.meta.env.DEV) {
-              (window as unknown as { __deck?: unknown }).__deck = (
-                r as unknown as { deck?: unknown } | null
-              )?.deck;
+              /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
+              (window as any).__deck = (r as any)?.deck;
+              /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
             }
           }}
           views={VIEW}
           viewState={viewState}
-          onViewStateChange={({ viewState: next }) =>
-            setViewState(next as OrthographicViewState)
-          }
+          onViewStateChange={({ viewState: next }) => setViewState(next)}
           layers={layers}
           getTooltip={getTooltip}
           getCursor={({ isHovering }) => (isHovering ? "pointer" : "grab")}

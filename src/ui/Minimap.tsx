@@ -9,7 +9,7 @@ interface Props {
   bounds?: readonly [number, number, number, number];
   imageWidth: number;
   imageHeight: number;
-  onNavigate(x: number, y: number): void;
+  onNavigate: (x: number, y: number) => void;
 }
 
 /**

@@ -94,23 +94,23 @@ export interface AppState {
   /** False once contrast comes from saved settings rather than the data. */
   autoContrast: boolean;
 
-  open(spec: SourceSpec): Promise<void>;
-  setChannel(index: number, patch: Partial<ChannelSettings>): void;
-  setImageOpacity(value: number): void;
-  setViewZoom(zoom: number): void;
-  setShowCells(value: boolean): void;
-  setShowCellBoundaries(value: boolean): void;
-  setShowNucleusBoundaries(value: boolean): void;
-  setBoundaryStyle(value: "outline" | "fill" | "both"): void;
-  setBoundaryStatus(value: BoundaryStatus): void;
-  setCellOpacity(value: number): void;
-  setCellColoring(patch: Partial<CellColoring>): Promise<void>;
-  importGroupFiles(files: File[]): Promise<void>;
-  removeGroupSet(name: string): Promise<void>;
-  toggleGroupCategory(name: string, category: string): Promise<void>;
-  setGroupCategoriesHidden(name: string, hidden: string[]): Promise<void>;
-  selectCell(index?: number): Promise<void>;
-  reset(): void;
+  open: (spec: SourceSpec) => Promise<void>;
+  setChannel: (index: number, patch: Partial<ChannelSettings>) => void;
+  setImageOpacity: (value: number) => void;
+  setViewZoom: (zoom: number) => void;
+  setShowCells: (value: boolean) => void;
+  setShowCellBoundaries: (value: boolean) => void;
+  setShowNucleusBoundaries: (value: boolean) => void;
+  setBoundaryStyle: (value: "outline" | "fill" | "both") => void;
+  setBoundaryStatus: (value: BoundaryStatus) => void;
+  setCellOpacity: (value: number) => void;
+  setCellColoring: (patch: Partial<CellColoring>) => Promise<void>;
+  importGroupFiles: (files: File[]) => Promise<void>;
+  removeGroupSet: (name: string) => Promise<void>;
+  toggleGroupCategory: (name: string, category: string) => void;
+  setGroupCategoriesHidden: (name: string, hidden: string[]) => void;
+  selectCell: (index?: number) => Promise<void>;
+  reset: () => void;
 }
 
 export interface BoundaryStatus {
@@ -475,16 +475,16 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
-  async toggleGroupCategory(name, category) {
-    const set0 = get().groupSets.find((g) => g.name === name);
-    if (!set0) return;
-    const hidden = set0.hidden.includes(category)
-      ? set0.hidden.filter((c) => c !== category)
-      : [...set0.hidden, category];
-    await get().setGroupCategoriesHidden(name, hidden);
+  toggleGroupCategory(name, category) {
+    const current = get().groupSets.find((g) => g.name === name);
+    if (!current) return;
+    const hidden = current.hidden.includes(category)
+      ? current.hidden.filter((c) => c !== category)
+      : [...current.hidden, category];
+    get().setGroupCategoriesHidden(name, hidden);
   },
 
-  async setGroupCategoriesHidden(name, hidden) {
+  setGroupCategoriesHidden(name, hidden) {
     set((s) => ({
       groupSets: s.groupSets.map((g) => (g.name === name ? { ...g, hidden } : g)),
     }));

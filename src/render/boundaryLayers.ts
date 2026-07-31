@@ -15,7 +15,7 @@ export interface BoundaryLayerOptions {
   opacity: number;
   /** Whether this set answers hover/click. Only one set should. */
   pickable?: boolean;
-  onClick?(cellIndex: number): void;
+  onClick?: (cellIndex: number) => void;
 }
 
 /**

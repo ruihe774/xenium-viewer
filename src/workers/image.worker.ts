@@ -43,9 +43,9 @@ function downsample(
 }
 
 export interface ImageWorkerApi {
-  init(spec: SourceSpec, levelPaths: string[], axes: string[], cacheBytes: number): Promise<void>;
-  getTile(level: number, c: number, tx: number, ty: number, tileSize: number): Promise<TileData>;
-  channelStats(level: number, c: number): Promise<ChannelStats>;
+  init: (spec: SourceSpec, levelPaths: string[], axes: string[], cacheBytes: number) => Promise<void>;
+  getTile: (level: number, c: number, tx: number, ty: number, tileSize: number) => Promise<TileData>;
+  channelStats: (level: number, c: number) => Promise<ChannelStats>;
 }
 
 const HISTOGRAM_BINS = 256;
@@ -183,7 +183,7 @@ class ImageTileServer implements ImageWorkerApi {
     const reads: Promise<void>[] = [];
     for (let cy = Math.floor(y0 / chunkHeight); cy <= Math.floor((y0 + height - 1) / chunkHeight); cy++) {
       for (let cx = Math.floor(x0 / chunkWidth); cx <= Math.floor((x0 + width - 1) / chunkWidth); cx++) {
-        const coords = new Array(arr.shape.length).fill(0);
+        const coords = new Array<number>(arr.shape.length).fill(0);
         // Channel chunking is [1, ...] in practice, but don't assume it.
         const channelInChunk = ci >= 0 ? c % arr.chunks[ci] : 0;
         if (ci >= 0) coords[ci] = Math.floor(c / arr.chunks[ci]);
@@ -224,10 +224,10 @@ class ImageTileServer implements ImageWorkerApi {
   async channelStats(level: number, c: number): Promise<ChannelStats> {
     const arr = this.#arrays[level];
     const { c: ci, x: xi, y: yi } = this.#axes;
-    const selection = new Array(arr.shape.length).fill(null);
+    const selection: (number | null)[] = new Array<null>(arr.shape.length).fill(null);
     if (ci >= 0) selection[ci] = c;
     const result = await zarr.get(arr, selection);
-    const stats = computeStats(result.data as Uint16Array, arr.shape[xi], arr.shape[yi]);
+    const stats = computeStats(result.data, arr.shape[xi], arr.shape[yi]);
     return Comlink.transfer(stats, [stats.thumbnail.data.buffer]);
   }
 }

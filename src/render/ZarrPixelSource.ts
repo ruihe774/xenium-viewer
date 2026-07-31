@@ -22,7 +22,7 @@ export interface PixelSource {
     selection: { c: number };
     signal?: AbortSignal;
   }): Promise<TileData>;
-  onTileError(err: Error): void;
+  onTileError: (err: Error) => void;
 }
 
 /** Thrown when a tile request is superseded; Viv swallows this exact value. */
@@ -80,6 +80,9 @@ export class ImagePyramid {
             Math.floor((y * TILE_SIZE) / chunkHeight),
           );
           const tile = await worker.getTile(index, selection.c, x, y, TILE_SIZE);
+          // Viv swallows this exact string value and nothing else, so it has to
+          // be thrown bare rather than wrapped in an Error.
+          // eslint-disable-next-line @typescript-eslint/only-throw-error
           if (signal?.aborted) throw SIGNAL_ABORTED;
           return tile;
         },

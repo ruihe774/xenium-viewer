@@ -15,13 +15,39 @@ shell. The app never touches it.
 
 ```bash
 npm run dev        # vite dev server on :5173 (strict port)
+npm run check      # typecheck + lint; run this before calling anything done
 npm run typecheck  # tsc --noEmit
+npm run lint       # eslint .
 npm run build      # tsc -b && vite build
 npm run preview    # serve the production build on :4173
 ```
 
-There is no linter or formatter configured, and no test suite. `npm run typecheck` plus
-driving the app in a browser is the whole verification story — see "Verifying changes".
+There is no formatter and no test suite. `npm run check` plus driving the app in a browser is
+the whole verification story — see "Verifying changes".
+
+### Linting
+
+ESLint 9 flat config in `eslint.config.js`, with **type-aware** `typescript-eslint` rules —
+most of the value here is in catching floating promises and `any` leaking across the worker
+boundary, none of which is visible without types. Both must stay clean.
+
+`reportUnusedDisableDirectives` is set to **error**: an `eslint-disable` that no longer
+suppresses anything fails the lint. So when you silence a rule, silence exactly the rules that
+fire and no more, and delete the directive when the underlying code changes.
+
+Two consequences worth knowing before you write new code:
+
+- **Interface members use property syntax** (`open: (spec) => void`), not method syntax
+  (`open(spec): void`). Method syntax makes `unbound-method` fire wherever a caller pulls the
+  function off the object — which is exactly how zustand actions and the Comlink worker APIs
+  are consumed. Property syntax is also stricter about parameter variance.
+- **Worker methods need not be `async`.** Comlink surfaces every one as a promise to callers
+  regardless, so marking a method `async` with nothing to await just trips `require-await`.
+
+The existing disables are all deliberate and commented: Viv's untyped extra layer props, the
+bare string Viv requires for aborted tiles, the debug `window.__deck` handle, a stable array
+index key, and two effects that legitimately set state (a worker pool's handle, and an initial
+view that depends on a post-layout measurement).
 
 ## Local data
 
@@ -163,8 +189,8 @@ whole-slide view and ~570 MB at native resolution.
 
 ## Conventions
 
-- TypeScript strict, including `noUnusedLocals` / `noUnusedParameters`. Keep `npm run
-  typecheck` clean; it is the only automated gate.
+- TypeScript strict, including `noUnusedLocals` / `noUnusedParameters`. `npm run check` is the
+  only automated gate; keep it clean.
 - Comments explain *why*, especially where the code works around a library's behaviour. The
   constraints above are all documented at their call sites too — keep those in sync.
 - Tuning constants (cache sizes, tile size, polygon caps, zoom thresholds) are named

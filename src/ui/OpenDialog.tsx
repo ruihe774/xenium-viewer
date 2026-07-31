@@ -37,7 +37,11 @@ export function OpenDialog() {
         <h1>Xenium Viewer</h1>
         <p className="lede">Open a Xenium SpatialData zarr store.</p>
 
-        <button className="primary" onClick={pickDirectory} disabled={!supportsPicker || busy}>
+        <button
+          className="primary"
+          onClick={() => void pickDirectory()}
+          disabled={!supportsPicker || busy}
+        >
           {busy ? "Opening…" : "Open folder…"}
         </button>
         {!supportsPicker && (

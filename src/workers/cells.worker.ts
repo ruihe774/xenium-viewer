@@ -95,26 +95,27 @@ export type ViewportShapes =
       cellIndices: Int32Array;
     };
 
+/**
+ * Declared with property rather than method syntax throughout: methods are
+ * bivariant in their parameters and trip `unbound-method` when a caller pulls
+ * one off the object, which is exactly how these are consumed.
+ */
 export interface CellsWorkerApi {
-  init(
-    spec: SourceSpec,
-    table: TableElement,
-    toPixel: XYTransform,
-  ): Promise<CellsInit>;
-  column(name: string): Promise<ColumnData>;
-  importGroups(name: string, text: string): Promise<GroupSetSummary>;
-  removeGroups(name: string): Promise<void>;
-  details(index: number): Promise<Record<string, string>>;
-  loadBoundaries(
+  init: (spec: SourceSpec, table: TableElement, toPixel: XYTransform) => Promise<CellsInit>;
+  column: (name: string) => Promise<ColumnData>;
+  importGroups: (name: string, text: string) => Promise<GroupSetSummary>;
+  removeGroups: (name: string) => void;
+  details: (index: number) => Promise<Record<string, string>>;
+  loadBoundaries: (
     name: string,
     parquetPath: string,
     toPixel: XYTransform,
-  ): Promise<BoundarySummary>;
-  viewportShapes(
+  ) => Promise<BoundarySummary>;
+  viewportShapes: (
     name: string,
     box: [number, number, number, number],
     maxCells: number,
-  ): Promise<ViewportShapes>;
+  ) => ViewportShapes;
 }
 
 interface Boundaries {
@@ -372,7 +373,9 @@ class CellStore implements CellsWorkerApi {
     };
   }
 
-  async removeGroups(name: string) {
+  // Not async: Comlink surfaces every worker method as a promise to callers
+  // regardless, so there is nothing to gain from marking it here.
+  removeGroups(name: string) {
     this.#groups.delete(name);
   }
 
@@ -456,7 +459,7 @@ class CellStore implements CellsWorkerApi {
     geometry = [];
 
     const tableIds = await this.#stringColumn(this.#table.indexColumn.path);
-    const cellIndices = await matchToTable(ids, tableIds, count);
+    const cellIndices = matchToTable(ids, tableIds, count);
     ids = undefined;
 
     this.#boundaries.set(name, {
@@ -470,11 +473,11 @@ class CellStore implements CellsWorkerApi {
     return { count, vertices: total, elapsedMs: Math.round(performance.now() - started) };
   }
 
-  async viewportShapes(
+  viewportShapes(
     name: string,
     box: [number, number, number, number],
     maxCells: number,
-  ): Promise<ViewportShapes> {
+  ): ViewportShapes {
     const boundaries = this.#boundaries.get(name);
     if (!boundaries) return { tooMany: false, count: 0, ...emptyShapes() };
     const [x0, y0, x1, y1] = box;
@@ -562,11 +565,11 @@ function emptyShapes() {
 }
 
 /** Row index in the table for each polygon, matched on cell id. */
-async function matchToTable(
+function matchToTable(
   ids: string[] | undefined,
   tableIds: string[],
   count: number,
-): Promise<Int32Array> {
+): Int32Array {
   const out = new Int32Array(count);
   // cell_boundaries is written in table order, so skip the map entirely when
   // the ids line up. nucleus_boundaries does not (a cell can have >1 nucleus).

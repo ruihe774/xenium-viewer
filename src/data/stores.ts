@@ -12,7 +12,7 @@ export type SourceSpec =
 /** Minimal random-access file interface, matching hyparquet's `AsyncBuffer`. */
 export interface AsyncBuffer {
   byteLength: number;
-  slice(start: number, end?: number): Promise<ArrayBuffer>;
+  slice: (start: number, end?: number) => Promise<ArrayBuffer>;
 }
 
 function splitKey(key: string): string[] {
@@ -111,7 +111,7 @@ export interface DataSource {
   spec: SourceSpec;
   store: AsyncReadable;
   /** Opens a non-zarr file (e.g. `shapes/cell_boundaries/shapes.parquet`). */
-  openFile(path: string): Promise<AsyncBuffer | undefined>;
+  openFile: (path: string) => Promise<AsyncBuffer | undefined>;
 }
 
 /** zarrita's FetchStore needs an absolute URL, so resolve relative ones here. */

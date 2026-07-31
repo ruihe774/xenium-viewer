@@ -110,13 +110,13 @@ export function GroupsPanel() {
             <div className="legend-head">
               <span className="dim">Groups</span>
               <span>
-                <button className="link" onClick={() => void setGroupCategoriesHidden(active.name, [])}>
+                <button className="link" onClick={() => setGroupCategoriesHidden(active.name, [])}>
                   all
                 </button>
                 <button
                   className="link"
                   onClick={() =>
-                    void setGroupCategoriesHidden(active.name, [...active.categories])
+                    setGroupCategoriesHidden(active.name, [...active.categories])
                   }
                 >
                   none
@@ -130,7 +130,7 @@ export function GroupsPanel() {
                   <li key={label}>
                     <button
                       className={`legend-row${hidden ? " off" : ""}`}
-                      onClick={() => void toggleGroupCategory(active.name, label)}
+                      onClick={() => toggleGroupCategory(active.name, label)}
                       title={`${label} — ${active.counts[i].toLocaleString("en-US")} cells`}
                     >
                       <span

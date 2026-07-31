@@ -4,7 +4,7 @@ interface Props {
   min: number;
   max: number;
   value: [number, number];
-  onChange(value: [number, number]): void;
+  onChange: (value: [number, number]) => void;
   /** Optional bin counts drawn behind the track, spanning [min, max]. */
   histogram?: number[];
   color?: [number, number, number];
@@ -73,9 +73,8 @@ export function RangeSlider({ min, max, value, onChange, histogram, color, step 
         {histogram && histogram.length > 0 && (
           <div className="range-hist">
             {histogram.map((count, i) => (
-              // Bins are positional and fixed in number, so the index is a
-              // stable identity here.
               <span
+                // eslint-disable-next-line react/no-array-index-key
                 key={i}
                 style={{ height: `${(Math.log1p(count) / peak) * 100}%` }}
               />

@@ -7,6 +7,9 @@ export const MAX_VISIBLE_POLYGONS = 40000;
 
 const QUERY_DEBOUNCE_MS = 120;
 
+/** Shared "nothing to draw" value, so identity checks stay cheap. */
+const EMPTY: BoundaryResult = { tooMany: false, loading: false };
+
 export interface BoundaryResult {
   shapes?: Extract<ViewportShapes, { tooMany: false }>;
   /** True when the viewport holds more polygons than we will draw. */
@@ -29,25 +32,30 @@ export function useBoundaries(
 ): BoundaryResult {
   const client = useApp((s) => s.cellsClient);
   const dataset = useApp((s) => s.dataset);
-  const [result, setResult] = useState<BoundaryResult>({ tooMany: false, loading: false });
+  const [result, setResult] = useState<BoundaryResult>(EMPTY);
   const loaded = useRef<Promise<unknown>>();
+  const loadedFor = useRef<unknown>();
   const requestId = useRef(0);
 
   useEffect(() => {
-    loaded.current = undefined;
-    setResult({ tooMany: false, loading: false });
-  }, [client]);
-
-  useEffect(() => {
+    // A new worker invalidates the geometry the old one had decoded.
+    if (loadedFor.current !== client) {
+      loadedFor.current = client;
+      loaded.current = undefined;
+    }
     if (!enabled || !client || !dataset || !bounds) {
-      setResult((prev) => (prev.shapes || prev.tooMany ? { tooMany: false, loading: false } : prev));
+      // Invalidate anything in flight; the stale result is simply not returned
+      // (see below) rather than cleared, which would be a redundant render.
+      requestId.current++;
       return;
     }
     const id = ++requestId.current;
-    setResult((prev) => ({ ...prev, loading: true, error: undefined }));
 
     const timer = setTimeout(() => {
       void (async () => {
+        // Flagged only once the debounce actually fires, so a viewport that is
+        // still moving does not flicker the panel between states.
+        setResult((prev) => ({ ...prev, loading: true, error: undefined }));
         try {
           // The parquet decode happens once; later viewport changes are cheap.
           if (!loaded.current) {
@@ -87,5 +95,5 @@ export function useBoundaries(
     return () => clearTimeout(timer);
   }, [client, dataset, name, enabled, bounds]);
 
-  return result;
+  return enabled && client && dataset && bounds ? result : EMPTY;
 }
