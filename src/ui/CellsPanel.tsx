@@ -70,15 +70,19 @@ export function CellsPanel() {
           />
           <span>Nucleus boundaries</span>
         </label>
-        {boundaryStatus.error && <div className="error">{boundaryStatus.error}</div>}
-        {boundaryStatus.loading && <p className="dim">Loading boundaries…</p>}
-        {boundaryStatus.tooMany && !boundaryStatus.loading && (
-          <p className="dim">
-            {boundaryStatus.dotsVisible
-              ? "Too many cells in view for outlines — showing centroids."
-              : "Zoom in to see cell boundaries."}
-          </p>
-        )}
+        {/* Always mounted, one line, so toggling between these states — which
+            happens rapidly while panning/zooming — doesn't shift the layout
+            below. */}
+        <p className={`status-line ${boundaryStatus.error ? "error" : "dim"}`}>
+          {boundaryStatus.error ??
+            (boundaryStatus.loading
+              ? "Loading boundaries…"
+              : boundaryStatus.tooMany
+                ? boundaryStatus.dotsVisible
+                  ? "Too many cells in view for outlines — showing centroids."
+                  : "Zoom in to see cell boundaries."
+                : "Boundaries loaded.")}
+        </p>
         <label className="field">
           <span>Style</span>
           <select

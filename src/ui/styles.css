@@ -355,6 +355,12 @@ input[type="number"]:focus {
   color: var(--text-dim);
 }
 
+.status-line {
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .check-row {
   display: flex;
   align-items: center;
