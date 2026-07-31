@@ -40,3 +40,11 @@ export function saveSettings(datasetName: string, settings: StoredSettings): voi
     // Quota or private-mode failures are not worth surfacing.
   }
 }
+
+export function clearSettings(datasetName: string): void {
+  try {
+    localStorage.removeItem(PREFIX + datasetName);
+  } catch {
+    // Unavailable storage should never block the caller.
+  }
+}
