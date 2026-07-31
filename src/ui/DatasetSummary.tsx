@@ -1,5 +1,4 @@
 import { useApp } from "../store";
-import { clearSettings } from "../data/settings";
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -38,15 +37,6 @@ export function DatasetSummary() {
           <Row label="Shapes" value={dataset.shapes.map((s) => s.name).join(", ") || "—"} />
           <Row label="Labels" value={dataset.labels.map((s) => s.name).join(", ") || "—"} />
         </dl>
-        <button
-          className="reset-view"
-          onClick={() => {
-            clearSettings(dataset.name);
-            window.location.reload();
-          }}
-        >
-          Reset view options
-        </button>
       </div>
     </section>
   );

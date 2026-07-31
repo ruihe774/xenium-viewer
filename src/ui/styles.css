@@ -546,10 +546,6 @@ select {
   justify-content: space-between;
 }
 
-.reset-view {
-  margin-top: 12px;
-}
-
 button.link {
   background: none;
   border: none;
