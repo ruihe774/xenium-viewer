@@ -1,6 +1,6 @@
 import { type Layer, OrthographicView, type OrthographicViewState } from "@deck.gl/core";
 import { ScatterplotLayer } from "@deck.gl/layers";
-import DeckGL from "@deck.gl/react";
+import DeckGL, { type DeckGLRef } from "@deck.gl/react";
 import { ColorPaletteExtension, MultiscaleImageLayer } from "@hms-dbmi/viv";
 import { useEffect, useRef, useState } from "react";
 import { IMPORTED_SEGMENTATION_KEY } from "../data/cells";
@@ -87,8 +87,26 @@ export function Viewer() {
   const segmentationOpacity = useApp((s) => s.segmentationOpacity);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const deckRef = useRef<DeckGLRef>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [viewState, setViewState] = useState<OrthographicViewState>();
+
+  // Exposed for debugging from the console: layer list, tile cache occupancy,
+  // viewport state. A getter (not a one-time snapshot) because deck.gl's ref
+  // handle exposes `.deck` as a live accessor onto its internal instance,
+  // which is replaced under React StrictMode's mount/unmount/remount; a plain
+  // assignment here would freeze onto whatever instance existed at the moment
+  // the ref callback last fired, which can be a since-finalized one.
+  useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    Object.defineProperty(window, "__deck", {
+      configurable: true,
+      get: () => deckRef.current?.deck,
+    });
+    return () => {
+      delete (window as unknown as Record<string, unknown>).__deck;
+    };
+  }, []);
 
   const primary = dataset?.images.find((i) => i.name === "morphology_focus") ?? dataset?.images[0];
 
@@ -478,15 +496,7 @@ export function Viewer() {
     <div ref={containerRef} className="stage-inner">
       {viewState && (
         <DeckGL
-          // Exposed for debugging from the console: layer list, tile cache
-          // occupancy, viewport state. Dev builds only.
-          ref={(r) => {
-            if (import.meta.env.DEV) {
-              /* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
-              (window as any).__deck = (r as any)?.deck;
-              /* eslint-enable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
-            }
-          }}
+          ref={deckRef}
           views={VIEW}
           viewState={viewState}
           onViewStateChange={({ viewState: next }) => setViewState(next)}
