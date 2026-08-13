@@ -3,6 +3,7 @@ import { ScatterplotLayer } from "@deck.gl/layers";
 import DeckGL from "@deck.gl/react";
 import { ColorPaletteExtension, MultiscaleImageLayer } from "@hms-dbmi/viv";
 import { useEffect, useRef, useState } from "react";
+import { IMPORTED_SEGMENTATION_KEY } from "../data/cells";
 import { useApp } from "../store";
 import { Minimap } from "../ui/Minimap";
 import { ScaleBar } from "../ui/ScaleBar";
@@ -79,6 +80,11 @@ export function Viewer() {
   const transcriptOpacity = useApp((s) => s.transcriptOpacity);
   const transcriptGenes = useApp((s) => s.transcriptGenes);
   const hideOtherTranscripts = useApp((s) => s.hideOtherTranscripts);
+  const segmentation = useApp((s) => s.segmentation);
+  const showSegmentation = useApp((s) => s.showSegmentation);
+  const segmentationColor = useApp((s) => s.segmentationColor);
+  const segmentationStyle = useApp((s) => s.segmentationStyle);
+  const segmentationOpacity = useApp((s) => s.segmentationOpacity);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -215,6 +221,17 @@ export function Viewer() {
     showCells && showNucleusBoundaries,
     viewBounds,
   );
+  // Gated on its own toggle rather than `showCells`, so the alternative
+  // segmentation can be judged against the image with the Xenium boundaries
+  // off. `segmentation` (the import summary) doubles as the `preloaded`
+  // identity: its geometry was already decoded by the import action, and a
+  // new value after re-importing forces a fresh viewport query.
+  const altBoundaries = useBoundaries(
+    IMPORTED_SEGMENTATION_KEY,
+    showSegmentation && !!segmentation,
+    viewBounds,
+    segmentation,
+  );
 
   const transcripts = useTranscripts(showTranscripts, viewBounds);
 
@@ -278,6 +295,22 @@ export function Viewer() {
     return layers;
   })();
 
+  // Independent of `showCells` — the point of an alternative segmentation is
+  // to judge it against the morphology image, with or without the Xenium
+  // boundaries showing. Drawn last (see `layers` below) so it sits on top of
+  // them. Not pickable — like nuclei, an overlapping set that answered clicks
+  // would shadow the cell layer underneath it.
+  const altBoundaryLayers = altBoundaries.shapes
+    ? buildBoundaryLayers({
+        id: "alt-segmentation",
+        shapes: altBoundaries.shapes,
+        fallbackColor: segmentationColor,
+        style: segmentationStyle,
+        opacity: segmentationOpacity,
+        pickable: false,
+      })
+    : [];
+
   // Dots stand in whenever polygons are not being drawn — either because
   // boundaries are off, still loading, or there are too many in view.
   const showDots =
@@ -313,6 +346,17 @@ export function Viewer() {
       count: cellBoundaries.shapes?.count ?? 0,
     });
   }, [setBoundaryStatus, cellBoundaries, nucleusBoundaries, dotsVisible]);
+
+  const setSegmentationStatus = useApp((s) => s.setSegmentationStatus);
+  useEffect(() => {
+    setSegmentationStatus({
+      loading: altBoundaries.loading,
+      tooMany: altBoundaries.tooMany,
+      dotsVisible: false,
+      error: altBoundaries.error,
+      count: altBoundaries.shapes?.count ?? 0,
+    });
+  }, [setSegmentationStatus, altBoundaries]);
 
   const cellLayers = (() => {
     if (!showDots || dotCoverage === 0) return [];
@@ -396,6 +440,7 @@ export function Viewer() {
       ...boundaryLayers,
       ...cellLayers,
       ...selectionLayer,
+      ...altBoundaryLayers,
     ];
   })();
 

@@ -3,14 +3,17 @@ import type {
   BoundarySummary,
   CellsWorkerApi,
   ColumnData,
+  GeoJsonSummary,
   GroupSetSummary,
   ViewportShapes,
 } from "../workers/cells.worker";
 import CellsWorker from "../workers/cells.worker?worker";
+import { IMPORTED_SEGMENTATION_KEY } from "../workers/geojson";
 import type { Dataset } from "./dataset";
 import type { SourceSpec } from "./stores";
 
-export type { BoundarySummary, ColumnData, GroupSetSummary, ViewportShapes };
+export type { BoundarySummary, ColumnData, GeoJsonSummary, GroupSetSummary, ViewportShapes };
+export { IMPORTED_SEGMENTATION_KEY };
 
 /** Main-thread handle to the cells worker. */
 export class CellsClient {
@@ -28,9 +31,20 @@ export class CellsClient {
    */
   async init(spec: SourceSpec, dataset: Dataset) {
     if (!dataset.table) throw new Error("Dataset has no table");
+    return this.#api.init(spec, dataset.table, this.#alignmentTransform(dataset));
+  }
+
+  /**
+   * The transform that maps micrometre coordinates into this dataset's
+   * level-0 pixel space. `cell_boundaries` carries it in every SpatialData
+   * Xenium store; falling back to the first shapes element covers stores that
+   * name it differently. Shared by cell centroids and any imported geometry,
+   * since both are µm coordinates that need to land in the same pixel space.
+   */
+  #alignmentTransform(dataset: Dataset) {
     const shapes = dataset.shapes.find((s) => s.name === "cell_boundaries") ?? dataset.shapes[0];
     if (!shapes) throw new Error("Dataset has no shapes element to align cells with");
-    return this.#api.init(spec, dataset.table, shapes.toPixel);
+    return shapes.toPixel;
   }
 
   ids(): Promise<string[]> {
@@ -53,6 +67,27 @@ export class CellsClient {
     const shapes = dataset.shapes.find((s) => s.name === name);
     if (!shapes) throw new Error(`No shapes element named "${name}"`);
     return this.#api.loadBoundaries(name, shapes.parquetPath, shapes.toPixel);
+  }
+
+  /**
+   * Imports a GeoJSON FeatureCollection as the alternative segmentation.
+   * `onProgress` has to cross the worker boundary, so it is passed as a
+   * Comlink proxy rather than a plain function (mirrors `ExpressionClient`).
+   */
+  importGeoJson(
+    dataset: Dataset,
+    file: File,
+    onProgress: (fraction: number) => void,
+  ): Promise<GeoJsonSummary> {
+    return this.#api.importGeoJson(
+      file,
+      this.#alignmentTransform(dataset),
+      Comlink.proxy(onProgress),
+    );
+  }
+
+  removeGeoJson(): Promise<void> {
+    return this.#api.removeGeoJson();
   }
 
   viewportShapes(

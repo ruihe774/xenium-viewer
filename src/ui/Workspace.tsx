@@ -7,6 +7,7 @@ import { DatasetSummary } from "./DatasetSummary";
 import { GenesPanel } from "./GenesPanel";
 import { GroupsPanel } from "./GroupsPanel";
 import { ImagePanel } from "./ImagePanel";
+import { SegmentationPanel } from "./SegmentationPanel";
 import { TranscriptsPanel } from "./TranscriptsPanel";
 
 /**
@@ -36,6 +37,7 @@ export function Workspace({ dataset }: { dataset: Dataset }) {
           <ImagePanel />
           <CellsPanel />
           <GroupsPanel />
+          <SegmentationPanel />
           <GenesPanel />
           <TranscriptsPanel />
           <CellInspector />

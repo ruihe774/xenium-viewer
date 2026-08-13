@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { CellsClient, type ColumnData } from "./data/cells";
+import { CellsClient, type ColumnData, type GeoJsonSummary } from "./data/cells";
 import { type Dataset, loadDataset } from "./data/dataset";
 import { ExpressionClient, type GeneCount } from "./data/expression";
 import { saveRecentSettings, touchRecent, type StoredSettings } from "./data/recents";
@@ -55,6 +55,17 @@ export interface GroupSet {
   unmatched: number;
   /** Categories the user has hidden; hidden cells are not drawn. */
   hidden: string[];
+}
+
+/** The single user-imported alternative segmentation, if one has been loaded. */
+export interface Segmentation extends GeoJsonSummary {
+  name: string;
+  /**
+   * True when most of the imported geometry falls outside the slide — almost
+   * always a units mismatch (the importer assumes micrometres, matching every
+   * other coordinate a SpatialData store carries).
+   */
+  outOfBounds: boolean;
 }
 
 export interface CellsState {
@@ -122,6 +133,19 @@ export interface AppState {
   /** False once contrast comes from saved settings rather than the data. */
   autoContrast: boolean;
 
+  /** The imported alternative segmentation; a second import replaces it. */
+  segmentation?: Segmentation;
+  segmentationImporting: boolean;
+  /** 0..1 while importing. */
+  segmentationProgress: number;
+  segmentationError?: string;
+  showSegmentation: boolean;
+  segmentationColor: [number, number, number];
+  segmentationStyle: "outline" | "fill" | "both";
+  segmentationOpacity: number;
+  /** Mirrored from the viewer, like `boundaryStatus`. */
+  segmentationStatus: BoundaryStatus;
+
   expressionClient?: ExpressionClient;
   /** Gene names from `var`, in column order. Empty when there is no `X`. */
   genes: string[];
@@ -152,6 +176,13 @@ export interface AppState {
   removeGroupSet: (name: string) => Promise<void>;
   toggleGroupCategory: (name: string, category: string) => void;
   setGroupCategoriesHidden: (name: string, hidden: string[]) => void;
+  importSegmentation: (file: File) => Promise<void>;
+  removeSegmentation: () => Promise<void>;
+  setShowSegmentation: (value: boolean) => void;
+  setSegmentationColor: (value: [number, number, number]) => void;
+  setSegmentationStyle: (value: "outline" | "fill" | "both") => void;
+  setSegmentationOpacity: (value: number) => void;
+  setSegmentationStatus: (value: BoundaryStatus) => void;
   selectCell: (index?: number) => Promise<void>;
   loadExpressionMatrix: () => Promise<void>;
   initTranscripts: () => Promise<void>;
@@ -306,6 +337,10 @@ function persist(state: AppState): void {
     transcriptOpacity: state.transcriptOpacity,
     transcriptGenes: state.transcriptGenes,
     hideOtherTranscripts: state.hideOtherTranscripts,
+    showSegmentation: state.showSegmentation,
+    segmentationColor: state.segmentationColor,
+    segmentationStyle: state.segmentationStyle,
+    segmentationOpacity: state.segmentationOpacity,
   };
   clearTimeout(persistTimer);
   persistTimer = setTimeout(() => {
@@ -330,6 +365,14 @@ export const useApp = create<AppState>((set, get) => ({
   uniformCellColor: [255, 255, 255],
   groupSets: [],
   groupImporting: false,
+  segmentationImporting: false,
+  segmentationProgress: 0,
+  showSegmentation: true,
+  // Amber — visually distinct from the grey/blue Xenium boundary colours.
+  segmentationColor: [255, 176, 46],
+  segmentationStyle: "outline",
+  segmentationOpacity: 0.9,
+  segmentationStatus: IDLE_BOUNDARIES,
   genes: [],
   matrixStatus: IDLE_MATRIX,
   showTranscripts: false,
@@ -371,6 +414,13 @@ export const useApp = create<AppState>((set, get) => ({
       transcriptsClient: undefined,
       transcriptInfo: undefined,
       transcriptStatus: IDLE_TRANSCRIPTS,
+      // The imported segmentation is a session artefact, like group sets —
+      // there is no file to reload it from.
+      segmentation: undefined,
+      segmentationImporting: false,
+      segmentationProgress: 0,
+      segmentationError: undefined,
+      segmentationStatus: IDLE_BOUNDARIES,
     });
     try {
       const source = createDataSource(spec);
@@ -418,6 +468,10 @@ export const useApp = create<AppState>((set, get) => ({
         transcriptOpacity: saved.transcriptOpacity ?? 0.55,
         transcriptGenes: saved.transcriptGenes ?? [],
         hideOtherTranscripts: saved.hideOtherTranscripts ?? false,
+        showSegmentation: saved.showSegmentation ?? true,
+        segmentationColor: saved.segmentationColor ?? [255, 176, 46],
+        segmentationStyle: saved.segmentationStyle ?? "outline",
+        segmentationOpacity: saved.segmentationOpacity ?? 0.9,
       });
 
       // Transcripts do not need a table; the gene list only labels their
@@ -673,6 +727,83 @@ export const useApp = create<AppState>((set, get) => ({
     }
   },
 
+  async importSegmentation(file) {
+    const { cellsClient, dataset } = get();
+    if (!cellsClient || !dataset) return;
+    set({ segmentationImporting: true, segmentationProgress: 0, segmentationError: undefined });
+    try {
+      const summary = await cellsClient.importGeoJson(dataset, file, (fraction) => {
+        set({ segmentationProgress: fraction });
+      });
+      console.info(
+        `[segmentation] ${summary.count.toLocaleString("en-US")} polygons, ` +
+          `${summary.vertices.toLocaleString("en-US")} vertices` +
+          (summary.skipped ? `, ${summary.skipped} skipped` : "") +
+          (summary.droppedRings ? `, ${summary.droppedRings} rings dropped` : "") +
+          ` in ${summary.elapsedMs} ms`,
+      );
+      // A file authored in pixels rather than micrometres lands scaled down by
+      // the pixel size (~4.7x on this dataset) into one corner of the slide —
+      // this is the cheapest signal that catches that without decoding twice.
+      const [minX, minY, maxX, maxY] = summary.bounds;
+      const overlapX = Math.max(0, Math.min(maxX, dataset.width) - Math.max(minX, 0));
+      const overlapY = Math.max(0, Math.min(maxY, dataset.height) - Math.max(minY, 0));
+      const area = Math.max(1, (maxX - minX) * (maxY - minY));
+      const outOfBounds = (overlapX * overlapY) / area < 0.5;
+      const name = file.name.replace(/\.(geo)?json$/i, "");
+      set({
+        segmentation: { ...summary, name, outOfBounds },
+        segmentationImporting: false,
+        segmentationProgress: 1,
+      });
+    } catch (err) {
+      set({
+        segmentationImporting: false,
+        segmentationProgress: 0,
+        segmentationError: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+
+  async removeSegmentation() {
+    await get().cellsClient?.removeGeoJson();
+    set({ segmentation: undefined, segmentationProgress: 0, segmentationStatus: IDLE_BOUNDARIES });
+  },
+
+  setShowSegmentation(value) {
+    set({ showSegmentation: value });
+    persist(get());
+  },
+
+  setSegmentationColor(value) {
+    set({ segmentationColor: value });
+    persist(get());
+  },
+
+  setSegmentationStyle(value) {
+    set({ segmentationStyle: value });
+    persist(get());
+  },
+
+  setSegmentationOpacity(value) {
+    set({ segmentationOpacity: value });
+    persist(get());
+  },
+
+  setSegmentationStatus(value) {
+    const prev = get().segmentationStatus;
+    if (
+      prev.loading === value.loading &&
+      prev.tooMany === value.tooMany &&
+      prev.dotsVisible === value.dotsVisible &&
+      prev.error === value.error &&
+      prev.count === value.count
+    ) {
+      return;
+    }
+    set({ segmentationStatus: value });
+  },
+
   async selectCell(index) {
     if (index === undefined) {
       set({ selectedCell: undefined, cellDetails: undefined, selectedCellGenes: undefined });
@@ -822,6 +953,11 @@ export const useApp = create<AppState>((set, get) => ({
       transcriptsClient: undefined,
       transcriptInfo: undefined,
       transcriptStatus: IDLE_TRANSCRIPTS,
+      segmentation: undefined,
+      segmentationImporting: false,
+      segmentationProgress: 0,
+      segmentationError: undefined,
+      segmentationStatus: IDLE_BOUNDARIES,
     });
   },
 }));

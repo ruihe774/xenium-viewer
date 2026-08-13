@@ -65,9 +65,12 @@ Not in git (`.gitignore`), but present in the working tree:
 - `slide01.zarr/` — Xenium 5K TMA, 16 GB. 51309×105305 px at 0.2125 µm/px, 4 morphology
   channels, 5 pyramid levels, 606,931 cells, 5,101 genes, 402.7M transcripts.
 - `slide01_annotations/*.csv` — sample cell-group files (`cell_id,group,color`).
+- `slide01_cellpose_cells.geojson` — sample alternative segmentation, 347 MB / 609,145 single-
+  ring `Polygon` features, coordinates in micrometres. Feature ids are a different vocabulary
+  from the table's cell ids (see the GeoJSON import constraints below).
 
 The dev server exposes the repo root at `/data` with byte-range support (see the
-`serveData` plugin in `vite.config.ts`), so both are reachable over HTTP:
+`serveData` plugin in `vite.config.ts`), so all three are reachable over HTTP:
 
 ```
 http://localhost:5173/?zarr=/data/slide01.zarr&x=25000&y=52000&zoom=-1
@@ -82,7 +85,7 @@ screenshots reproducible. Omit them to fit the whole slide.
 src/
   data/      store backends, dataset model, recents + settings, worker clients
   workers/   image tiles, cell table + geometry, expression, transcripts,
-             AnnData helpers, WKB, spatial grid, CSV
+             AnnData helpers, WKB, GeoJSON, spatial grid, CSV
   render/    Viv pixel source, deck.gl layers, the viewer component
   ui/        panels, gene list, colormaps, minimap, scale bar
   store.ts   zustand; single source of truth for all display state
@@ -187,6 +190,30 @@ children. `loadDataset` throws `UnsupportedDatasetError` with an actionable mess
 during debugging must be returned to the main thread and logged there (see how boundary load
 timings are reported through `BoundarySummary.elapsedMs`).
 
+**Imported GeoJSON is parsed per-feature, never with one `JSON.parse` on the whole file.** A
+347 MB / 609k-feature FeatureCollection produces an object graph in the low gigabytes if parsed
+whole. `workers/geojson.ts` streams the file (`Blob.stream()`), tracks brace depth with string/
+escape awareness to find each top-level feature object inside `"features"`, and calls
+`JSON.parse` on just that slice — 2.9 s for the sample file, against ~2.0 s for a hand-rolled
+byte scanner that was benchmarked and rejected because it cannot handle escapes or nested
+structure by construction. Reset the scanner's depth/string/escape state after every chunk
+boundary; skipping that silently stops parsing after the first chunk.
+
+**An imported segmentation keeps only the exterior ring**, exactly like `wkb.ts` does for
+GeoParquet: `exteriorRing()` in `geojson.ts` takes a `Polygon`'s first ring or a `MultiPolygon`'s
+first part, because the flat `starts`/`coords` layout has one vertex range per polygon and
+cannot express holes or multiple parts. Dropped rings are counted and surfaced in the panel, not
+silently discarded.
+
+**The imported segmentation lives under the fixed key `IMPORTED_SEGMENTATION_KEY`** in the cells
+worker's `#boundaries` map (`workers/geojson.ts`, imported by both the worker and
+`data/cells.ts` — not from `cells.worker.ts` itself, since that module's top-level
+`Comlink.expose(...)` would otherwise get bundled into the main thread). There is only one slot;
+re-importing replaces it. Its `cellIndices` are left at `-1` throughout — the feature ids are a
+different vocabulary from the cell table's and are never read — which is also why it never
+answers picking (see the RGBA/alpha note above: `expandColors` already paints unmatched polygons
+with the caller's fallback colour).
+
 ## Verifying changes
 
 Use the in-app Browser tools against the dev server. Load a pinned view so screenshots are
@@ -223,15 +250,22 @@ document
   .dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: dt }));
 ```
 
+Two panels use `.dropzone` now — cell groups and the alternative-segmentation import. The bare
+`document.querySelector(".dropzone")` above still resolves to the cell-groups one (it is mounted
+first); target `.dropzone.segmentation` for the GeoJSON import, e.g. with
+`slide01_cellpose_cells.geojson` (see "Local data").
+
 **`showDirectoryPicker` cannot be driven from the browser tools** — it needs a real user
 gesture on a native dialog. Ask the user to test that path when it is touched.
 
 Reference timings on the sample slide, for spotting regressions: centroids ~250 ms, channel
 stats ~1.0 s, cell boundaries ~1.4 s (606,931 polygons / 15.2M vertices), expression matrix
 ~4.3 s (154,647,224 non-zeros, 445 MB resident), gene switch 15–18 ms, transcript row-group
-index ~2.8 s (69 parts / 417 row groups), one transcript row group ~180 ms. Heap ~210 MB at
-whole-slide view and ~570 MB at native resolution — the expression matrix and the transcript
-cache are in worker heaps and do not show up there.
+index ~2.8 s (69 parts / 417 row groups), one transcript row group ~180 ms, GeoJSON segmentation
+import ~2–3 s (609,145 polygons / 14.2M vertices, ~130 MB resident in the cells worker). Heap
+~210 MB at whole-slide view and ~570 MB at native resolution — the expression matrix and the
+transcript cache are in worker heaps and do not show up there; an imported segmentation is the
+same, so importing one should not move this number.
 
 ## Conventions
 

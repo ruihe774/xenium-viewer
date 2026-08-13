@@ -16,6 +16,9 @@ Try it: https://xenium-viewer.ruihe774.workers.dev/.
   range you can adjust; categorical columns get a palette and legend.
 - **Cell groups** — import your own per-cell annotations from CSV, colour by them, and show
   or hide individual groups. Use the same CSV format as in Xenium Explorer.
+- **Alternative segmentation** — import a GeoJSON FeatureCollection of cell polygons (e.g. from
+  Cellpose or another re-segmentation) and overlay it on the Xenium boundaries in its own
+  colour, to judge the two against each other.
 - **Inspection** — hover for a readout, click a cell to pin its full `obs` record.
 - **Navigation** — whole-slide minimap with click-to-jump, µm scale bar, and linkable views.
 

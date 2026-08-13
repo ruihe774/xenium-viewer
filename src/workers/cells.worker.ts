@@ -7,6 +7,7 @@ import type { ObsColumn, TableElement, XYTransform } from "../data/dataset";
 import { type DataSource, type SourceSpec, createDataSource } from "../data/stores";
 import { extent, percentiles, readStringArray, toNumberArray } from "./anndata";
 import { type ColumnLayout, forEachRow, parseColor, resolveLayout } from "./csv";
+import { IMPORTED_SEGMENTATION_KEY, exteriorRing, forEachFeature } from "./geojson";
 import { UniformGrid } from "./grid";
 import { wkbReadRing, wkbVertexCount } from "./wkb";
 
@@ -55,6 +56,18 @@ export interface BoundarySummary {
   elapsedMs: number;
 }
 
+export interface GeoJsonSummary {
+  count: number;
+  vertices: number;
+  /** Features with no usable Polygon/MultiPolygon ring, or fewer than 3 points. */
+  skipped: number;
+  /** Interior rings and extra MultiPolygon parts dropped, as `wkb.ts` does for WKB. */
+  droppedRings: number;
+  /** Extent of the imported geometry in level-0 pixels, for an out-of-bounds check. */
+  bounds: [number, number, number, number];
+  elapsedMs: number;
+}
+
 export type ViewportShapes =
   | { tooMany: true; count: number }
   | {
@@ -85,6 +98,12 @@ export interface CellsWorkerApi {
     parquetPath: string,
     toPixel: XYTransform,
   ) => Promise<BoundarySummary>;
+  importGeoJson: (
+    file: File,
+    toPixel: XYTransform,
+    onProgress: (fraction: number) => void,
+  ) => Promise<GeoJsonSummary>;
+  removeGeoJson: () => void;
   viewportShapes: (
     name: string,
     box: [number, number, number, number],
@@ -430,6 +449,150 @@ class CellStore implements CellsWorkerApi {
       grid: new UniformGrid(bboxes, count, GRID_CELL_PX),
     });
     return { count, vertices: total, elapsedMs: Math.round(performance.now() - started) };
+  }
+
+  /**
+   * Decodes a user-imported GeoJSON FeatureCollection into the same flat
+   * layout `#readBoundaries` builds from GeoParquet/WKB, stored under the
+   * fixed `IMPORTED_SEGMENTATION_KEY` — there is only ever one imported
+   * segmentation, and re-importing replaces it.
+   *
+   * The total vertex count isn't known ahead of time (unlike the WKB path,
+   * which has already materialised every geometry blob before its prefix-sum
+   * pass), so `coords`/`starts`/`bboxes` grow by doubling as features stream
+   * in, then are trimmed to their exact size once done.
+   *
+   * Feature ids are intentionally not read: an alternative segmentation's ids
+   * are a different vocabulary from the cell table's (see CLAUDE.md), so
+   * `cellIndices` is left at -1 throughout — `expandColors` already paints
+   * unmatched polygons with the caller's fallback colour, which is exactly
+   * the flat "this is a different segmentation" colour this needs.
+   */
+  async importGeoJson(
+    file: File,
+    toPixel: XYTransform,
+    onProgress: (fraction: number) => void,
+  ): Promise<GeoJsonSummary> {
+    const started = performance.now();
+    const totalBytes = file.size || 1;
+
+    let count = 0;
+    let vertexTotal = 0;
+    let skipped = 0;
+    let droppedRings = 0;
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    let vertexCap = 1 << 20; // 1M vertices
+    let coords = new Float32Array(vertexCap * 2);
+    let polyCap = 1 << 16;
+    let starts = new Uint32Array(polyCap + 1);
+    let bboxes = new Float32Array(polyCap * 4);
+
+    const ensureVertexCap = (needed: number) => {
+      if (needed <= vertexCap) return;
+      let cap = vertexCap;
+      while (cap < needed) cap *= 2;
+      const next = new Float32Array(cap * 2);
+      next.set(coords.subarray(0, vertexTotal * 2));
+      coords = next;
+      vertexCap = cap;
+    };
+    const ensurePolyCap = (needed: number) => {
+      if (needed <= polyCap) return;
+      let cap = polyCap;
+      while (cap < needed) cap *= 2;
+      const nextStarts = new Uint32Array(cap + 1);
+      nextStarts.set(starts.subarray(0, count + 1));
+      starts = nextStarts;
+      const nextBboxes = new Float32Array(cap * 4);
+      nextBboxes.set(bboxes.subarray(0, count * 4));
+      bboxes = nextBboxes;
+      polyCap = cap;
+    };
+
+    await forEachFeature(
+      file,
+      (feature) => {
+        const ring = exteriorRing(feature.geometry);
+        if (!ring || ring.length < 3) {
+          skipped++;
+          return;
+        }
+        const geom = feature.geometry;
+        if (geom?.type === "Polygon") {
+          const rings = geom.coordinates as number[][][];
+          droppedRings += Math.max(0, rings.length - 1);
+        } else if (geom?.type === "MultiPolygon") {
+          const parts = geom.coordinates as number[][][][];
+          let totalRings = 0;
+          for (const part of parts) totalRings += part.length;
+          droppedRings += Math.max(0, totalRings - 1);
+        }
+
+        ensurePolyCap(count + 1);
+        ensureVertexCap(vertexTotal + ring.length);
+
+        const start = vertexTotal;
+        let rMinX = Number.POSITIVE_INFINITY;
+        let rMinY = Number.POSITIVE_INFINITY;
+        let rMaxX = Number.NEGATIVE_INFINITY;
+        let rMaxY = Number.NEGATIVE_INFINITY;
+        for (let i = 0; i < ring.length; i++) {
+          const x = ring[i][0] * toPixel.sx + toPixel.tx;
+          const y = ring[i][1] * toPixel.sy + toPixel.ty;
+          coords[(start + i) * 2] = x;
+          coords[(start + i) * 2 + 1] = y;
+          if (x < rMinX) rMinX = x;
+          if (x > rMaxX) rMaxX = x;
+          if (y < rMinY) rMinY = y;
+          if (y > rMaxY) rMaxY = y;
+        }
+        vertexTotal += ring.length;
+        starts[count] = start;
+        bboxes[count * 4] = rMinX;
+        bboxes[count * 4 + 1] = rMinY;
+        bboxes[count * 4 + 2] = rMaxX;
+        bboxes[count * 4 + 3] = rMaxY;
+        if (rMinX < minX) minX = rMinX;
+        if (rMinY < minY) minY = rMinY;
+        if (rMaxX > maxX) maxX = rMaxX;
+        if (rMaxY > maxY) maxY = rMaxY;
+        count++;
+      },
+      (bytesRead) => onProgress(Math.min(1, bytesRead / totalBytes)),
+    );
+    starts[count] = vertexTotal;
+
+    const finalCoords = coords.slice(0, vertexTotal * 2);
+    const finalStarts = starts.slice(0, count + 1);
+    const finalBboxes = bboxes.slice(0, count * 4);
+    const cellIndices = new Int32Array(count).fill(-1);
+
+    this.#boundaries.set(IMPORTED_SEGMENTATION_KEY, {
+      count,
+      coords: finalCoords,
+      starts: finalStarts,
+      bboxes: finalBboxes,
+      cellIndices,
+      grid: new UniformGrid(finalBboxes, count, GRID_CELL_PX),
+    });
+
+    return {
+      count,
+      vertices: vertexTotal,
+      skipped,
+      droppedRings,
+      bounds: count > 0 ? [minX, minY, maxX, maxY] : [0, 0, 0, 0],
+      elapsedMs: Math.round(performance.now() - started),
+    };
+  }
+
+  removeGeoJson() {
+    this.#boundaries.delete(IMPORTED_SEGMENTATION_KEY);
+    this.#pendingBoundaries.delete(IMPORTED_SEGMENTATION_KEY);
   }
 
   viewportShapes(

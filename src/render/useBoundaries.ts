@@ -29,6 +29,14 @@ export function useBoundaries(
   name: string,
   enabled: boolean,
   bounds: readonly [number, number, number, number] | undefined,
+  /**
+   * Identity of geometry already resident in the worker, for a set that was
+   * imported rather than read from the store — the one-shot `loadBoundaries`
+   * call is skipped entirely and the viewport is queried against whatever the
+   * import already decoded. Passing a new value (e.g. a fresh summary object
+   * after re-importing) forces a re-query.
+   */
+  preloaded?: object,
 ): BoundaryResult {
   const client = useApp((s) => s.cellsClient);
   const dataset = useApp((s) => s.dataset);
@@ -58,7 +66,9 @@ export function useBoundaries(
         setResult((prev) => ({ ...prev, loading: true, error: undefined }));
         try {
           // The parquet decode happens once; later viewport changes are cheap.
-          if (!loaded.current) {
+          // Preloaded (imported) geometry skips this — it was already decoded
+          // by the import action, not by this hook.
+          if (!loaded.current && !preloaded) {
             loaded.current = client.loadBoundaries(dataset, name).then((summary) => {
               console.info(
                 `[cells] ${name}: ${summary.count.toLocaleString("en-US")} polygons, ` +
@@ -93,7 +103,7 @@ export function useBoundaries(
     }, QUERY_DEBOUNCE_MS);
 
     return () => clearTimeout(timer);
-  }, [client, dataset, name, enabled, bounds]);
+  }, [client, dataset, name, enabled, bounds, preloaded]);
 
   return enabled && client && dataset && bounds ? result : EMPTY;
 }

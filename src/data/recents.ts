@@ -26,6 +26,10 @@ export interface StoredSettings {
   /** Genes the user gave their own colour, by name — stable for a dataset. */
   transcriptGenes?: string[];
   hideOtherTranscripts?: boolean;
+  showSegmentation?: boolean;
+  segmentationColor?: [number, number, number];
+  segmentationStyle?: "outline" | "fill" | "both";
+  segmentationOpacity?: number;
 }
 
 /**
